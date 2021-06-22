@@ -69,8 +69,8 @@ PREFIX = 'HC1:'
 
 CLAIM_NAMES = {
     1: "Issuer",
-    6: "Cert Issued At",
-    4: "Cert Expires At",
+    6: "Issued At",
+    4: "Expires At",
     -260: "Health Claims",
 }
 DATETIME_CLAIMS = {6, 4}
@@ -219,7 +219,7 @@ def main() -> None:
                         value = dt.isoformat()
                 else:
                     name = f'Claim {key} (unknown)'
-                print(f'{name:20}: {value}')
+                print(f'{name:15}: {value}')
 
         if not args.no_verify:
             if args.certs_file:
@@ -229,11 +229,11 @@ def main() -> None:
 
             valid = verify_ehc(ehc_msg, certs)
 
-            print(f'Signature Valid     : {valid}')
+            print(f'Signature Valid: {valid}')
 
         ehc = ehc_payload[-260][1]
         
-        print('Payload             :')
+        print('Payload        :')
         print(json.dumps(ehc, indent=4, sort_keys=True, default=json_serial))
         print()
 
