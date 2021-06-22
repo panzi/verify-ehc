@@ -221,6 +221,11 @@ def main() -> None:
                     name = f'Claim {key} (unknown)'
                 print(f'{name:15}: {value}')
 
+        expires_at_int = ehc_payload.get(4)
+        if expires_at_int is not None:
+            expires_at = datetime(1970, 1, 1) + timedelta(seconds=expires_at_int)
+            print(f'Is Expired     :', datetime.now() <= expires_at)
+
         if not args.no_verify:
             if args.certs_file:
                 certs = load_ehc_certs(args.certs_file)
