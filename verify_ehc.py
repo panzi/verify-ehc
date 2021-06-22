@@ -6,23 +6,16 @@ import json
 import sys
 import zlib
 import re
-import os
-import pathlib
 import argparse
 
-from hmac import compare_digest
-from base64 import b64decode
 from datetime import date, datetime, timedelta
 
-import json
 import cbor2 # type: ignore
 import cose.algorithms # type: ignore
 import cose.keys.curves # type: ignore
 import cose.keys.keytype # type: ignore
 import requests
 
-from binascii import unhexlify, hexlify
-from os.path import abspath, dirname, join as joinpath, exists
 from base45 import b45decode # type: ignore
 from cose.headers import KID # type: ignore
 from cose.keys import CoseKey
