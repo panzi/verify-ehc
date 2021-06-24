@@ -217,7 +217,7 @@ def main() -> None:
         expires_at_int = ehc_payload.get(4)
         if expires_at_int is not None:
             expires_at = datetime(1970, 1, 1) + timedelta(seconds=expires_at_int)
-            print(f'Is Expired     :', datetime.now() <= expires_at)
+            print(f'Is Expired     :', datetime.now() >= expires_at)
 
         if not args.no_verify:
             if args.certs_file:
