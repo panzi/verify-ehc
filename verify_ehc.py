@@ -111,7 +111,10 @@ def decode_ehc(b45_data: str) -> CoseMessage:
         if b45_data.startswith(':'):
             b45_data = b45_data[1:]
 
-    data = b45decode(b45_data)
+    try:
+        data = b45decode(b45_data)
+    except ValueError:
+        raise ValueError(f'Invalid base45 string. Try with single quotes.') from None
 
     if data.startswith(b'x'):
         data = zlib.decompress(data)
