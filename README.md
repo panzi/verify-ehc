@@ -20,14 +20,15 @@ For tests:
 For vaccinations:
 
 * For vaccines with 2 vacciantions:
-  - 1st vaccination is valid from 22 days to 90 days after the vaccination
-  - 2nd vaccination adds 180 days to that (i.e. 270 days from the 1st vaccination,
-    though the date of the 1st vaccination is not included in the EHC of the 2nd
-    vaccination!)
+  - 1st vaccination is valid starting from 22 days and ending at 90 days after
+    the vaccination
+  - 2nd vaccination adds 180 days to that (i.e. it's valid for 270 days from
+    the 1st vaccination, though the date of the 1st vaccination is not included
+    in the EHC of the 2nd vaccination!)
 * For vaccines with only 1 vaccination (e.g. Johnson & Johnson):
-  - valid from 22 days to 270 days after the vaccination
+  - valid starting from 22 days and ending at to 270 days after the vaccination
 * For people recovered from COVID-19 that only need 1 vaccination:
-  - valid from the day of vaccination to 270 days after
+  - valid starting from the day of vaccination and ending at 270 days after
 
 **NOTE:** These rules might be different in different countries and are subject
 to change. This information is supplied without liability.
