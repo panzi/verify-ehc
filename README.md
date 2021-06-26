@@ -8,7 +8,7 @@ expiration date of tests or vaccinations as defined by EU or local law. In all
 examples I saw it is much longer. Therefore you need to implement your own logic
 with the rules defined by your government to get propper expirations dates.
 
-Here in Austria the rules as of today are as follows (Source:
+Here in Austria the rules as of writing (2021-06-26) are as follows (Source:
 [gesundheit.gv.at](https://www.gesundheit.gv.at/service/gruener-pass/inhalt#heading_Was_bekomme_ich_ein_Impfzertifikat_und_wie_lange_gilt_es_)):
 
 For tests:
