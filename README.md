@@ -13,7 +13,7 @@ Here in Austria the rules as of writing (2021-06-26) are as follows (Source:
 
 For tests:
 
-* Self-Test: 24 hours (though self-tests don't get an EHC)
+* Self-Test: 24 hours (though as far as I know self-tests don't get an EHC)
 * Antigen-Tests: 48 hours
 * PCR-Tests: 72 hours
 
