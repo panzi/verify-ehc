@@ -204,6 +204,8 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
     cert = certs.get(given_kid) # XXX: is this correct? is it not two levels of signed certificates?
     if not cert:
         raise KeyError(f'Key ID not found in cert list: {given_kid.hex()}')
+    
+    print("Key ID         : " + given_kid.hex() + " / " + str(b64encode(given_kid)))
 
     pk = cert.public_key()
 
@@ -253,6 +255,8 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
     #    )
     else:
         raise KeyError(f'Unsupported public key type: {type(pk).__name__}')
+
+    print("Key type       : " + type(pk).__name__)
 
     return msg.verify_signature()
 
