@@ -10,7 +10,7 @@ import argparse
 import codecs
 
 from datetime import date, datetime, timedelta
-from base64 import b64decode
+from base64 import b64decode, b64encode
 
 import cbor2 # type: ignore
 import cose.algorithms # type: ignore
@@ -200,14 +200,14 @@ def decode_ehc(b45_data: str) -> CoseMessage:
 
 def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
     given_kid = msg.phdr.get(KID) or msg.uhdr[KID]
+    print(f'Key ID         : {given_kid.hex()} / {b64encode(given_kid).decode("ASCII")}')
 
     cert = certs.get(given_kid) # XXX: is this correct? is it not two levels of signed certificates?
     if not cert:
         raise KeyError(f'Key ID not found in cert list: {given_kid.hex()}')
-    
-    print("Key ID         : " + given_kid.hex() + " / " + str(b64encode(given_kid)))
 
     pk = cert.public_key()
+    print(f'Key type       : {type(pk).__name__.strip("_")}')
 
     if isinstance(pk, EllipticCurvePublicKey):
         rsa_pn = pk.public_numbers()
@@ -255,8 +255,6 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
     #    )
     else:
         raise KeyError(f'Unsupported public key type: {type(pk).__name__}')
-
-    print("Key type       : " + type(pk).__name__)
 
     return msg.verify_signature()
 
