@@ -70,10 +70,14 @@ CLAIM_NAMES = {
 }
 DATETIME_CLAIMS = {6, 4}
 
-# XXX: This is an old test trust list, not current! It includes test public keys too!
-CERTS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/listv2'
-SIGNS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/sigv2' # TODO: do something with this
+# This is an old test trust list, not current! It includes test public keys too!
+OLD_CERTS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/listv2'
+OLD_SIGNS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/sigv2'
 
+# Trust List used by Austrian greencheck app:
+CERTS_URL_AT = 'https://greencheck.gv.at/api/masterdata'
+
+# Trust List used by German Digitaler-Impfnachweis app:
 CERTS_URL_DE = 'https://de.dscg.ubirch.com/trustList/DSC/'
 
 # Netherlands public keys:
@@ -82,9 +86,8 @@ CERTS_URL_DE = 'https://de.dscg.ubirch.com/trustList/DSC/'
 # Keys from a French validation app, don't know if that is something official or a hobby project by someone:
 # https://github.com/lovasoa/sanipasse/blob/master/src/assets/Digital_Green_Certificate_Signing_Keys.json
 
-# Trust List used by Austrian greencheck app:
-# https://greencheck.gv.at/api/masterdata
-# Apparently this is encrypted, but it should be possible to somehow decrypt it. Have to investigate.
+# Sweden:
+# https://dgcg.covidbevis.se/tp/trust-list
 
 # See also this thread:
 # https://github.com/eu-digital-green-certificates/dgc-participating-countries/issues/10
@@ -159,7 +162,7 @@ def download_ehc_certs(sources: List[str], debug_certs: bool = False) -> CertLis
         if source == 'AT':
             response = requests.get(CERTS_URL_AT)
             response.raise_for_status()
-            certs_cbor = response.content
+            certs_cbor = b64decode(json.loads(response.content)['trustList']['trustListContent'])
             certs_at = load_ehc_certs_cbor(certs_cbor)
             certs.update(certs_at)
         elif source == 'DE':
