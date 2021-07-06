@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
-from typing import Tuple, Any, Dict, Optional, List
+from typing import Tuple, Any, Dict, Optional, List, FrozenSet
 
 import json
 import sys
 import zlib
 import re
 import argparse
+import codecs
 
 from datetime import date, datetime, timedelta
 from base64 import b64decode
@@ -74,6 +75,14 @@ SIGNS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/sigv2' # TODO: do something with t
 
 CERTS_URL_DE = 'https://de.dscg.ubirch.com/trustList/DSC/'
 
+DEBUG_KEY_IDS: FrozenSet[bytes] = frozenset(
+    codecs.decode(key_id, 'hex')
+    for key_id in {
+        # EHCs generated with https://dgc.a-sit.at/ehn/ are signed with this key:
+        b'd919375fc1e7b6b2',
+    }
+)
+
 def json_serial(obj: Any) -> str:
     """JSON serializer for objects not serializable by default json code"""
 
@@ -129,7 +138,7 @@ def load_ehc_certs_signed_json(data: bytes) -> CertList:
 
     return certs
 
-def download_ehc_certs(sources: List[str]) -> CertList:
+def download_ehc_certs(sources: List[str], debug_certs: bool = False) -> CertList:
     certs = {}
 
     for source in sources:
@@ -147,6 +156,11 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             certs.update(certs_de)
         else:
             raise ValueError(f'Unknown trust list source: {source}')
+
+    if not debug_certs:
+        for key_id in DEBUG_KEY_IDS:
+            if key_id in certs:
+                del certs[key_id]
 
     return certs
 
@@ -231,8 +245,11 @@ def main() -> None:
     certs_ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
     certs_ap.add_argument('--certs-from', metavar="LIST", help="Download trust list from given country's trust list service. Entries from later country overwrites earlier. Supported countries: DE, AT (comma separated list, default: DE,AT)", default='DE,AT')
 
-    ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
-    ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a qr-code.')
+    verify_ap = ap.add_mutually_exclusive_group()
+    verify_ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
+    verify_ap.add_argument('--debug-certs', action='store_true', default=False, help='Keep debug trust list entries when verifying.')
+
+    ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a QR-code.')
     ap.add_argument('ehc_code', nargs='*')
 
     args = ap.parse_args()
@@ -274,7 +291,7 @@ def main() -> None:
             if args.certs_file:
                 certs = load_ehc_certs(args.certs_file)
             else:
-                certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')])
+                certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')], args.debug_certs)
 
             valid = verify_ehc(ehc_msg, certs)
 
