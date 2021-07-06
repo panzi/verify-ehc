@@ -9,6 +9,7 @@ import re
 import argparse
 
 from datetime import date, datetime, timedelta
+from base64 import b64decode
 
 import cbor2 # type: ignore
 import cose.algorithms # type: ignore
@@ -68,8 +69,10 @@ CLAIM_NAMES = {
 }
 DATETIME_CLAIMS = {6, 4}
 
-CERTS_URL = 'https://dgc.a-sit.at/ehn/cert/listv2'
-SIGNS_URL = 'https://dgc.a-sit.at/ehn/cert/sigv2' # TODO: do something with this
+CERTS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/listv2'
+SIGNS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/sigv2' # TODO: do something with this
+
+CERTS_URL_DE = 'https://de.dscg.ubirch.com/trustList/DSC/'
 
 def json_serial(obj: Any) -> str:
     """JSON serializer for objects not serializable by default json code"""
@@ -98,11 +101,53 @@ def load_ehc_certs_cbor(cbor_data: bytes) -> CertList:
 
     return certs
 
-def download_ehc_certs() -> CertList:
-    response = requests.get(CERTS_URL)
-    response.raise_for_status()
-    certs_cbor = response.content
-    certs = load_ehc_certs_cbor(certs_cbor)
+def load_ehc_certs_signed_json(data: bytes) -> CertList:
+    certs: CertList = {}
+
+    sign_b64, body_json = data.split(b'\n', 1)
+    sign = b64decode(sign_b64)
+    body = json.loads(body_json)
+
+    # TODO: Verify signature. Where to get the public key from?
+
+    for cert in body['certificates']:
+        key_id    = b64decode(cert['kid'])
+        country   = cert['country']
+        cert_type = cert['certificateType']
+        if cert_type != 'DSC':
+            print(f'[signed JSON cert list] unknown certificateType {cert_type!r} (country={country}, kid={key_id.hex()}', file=sys.stderr)
+            continue
+
+        raw_data = b64decode(cert['rawData'])
+
+        cert = x509.load_der_x509_certificate(raw_data)
+        fingerprint = cert.fingerprint(hashes.SHA256())
+        if key_id != fingerprint[0:8]:
+            raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+        certs[key_id] = cert
+
+    return certs
+
+def download_ehc_certs(sources: List[str]) -> CertList:
+    certs = {}
+
+    for source in sources:
+        if source == 'AT':
+            response = requests.get(CERTS_URL_AT)
+            response.raise_for_status()
+            certs_cbor = response.content
+            certs_at = load_ehc_certs_cbor(certs_cbor)
+            certs.update(certs_at)
+        elif source == 'DE':
+            response = requests.get(CERTS_URL_DE)
+            response.raise_for_status()
+            certs_signed_json = response.content
+            certs_de = load_ehc_certs_signed_json(certs_signed_json)
+            certs.update(certs_de)
+        else:
+            raise ValueError(f'Unknown trust list source: {source}')
+
     return certs
 
 def decode_ehc(b45_data: str) -> CoseMessage:
@@ -182,7 +227,10 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
+    certs_ap = ap.add_mutually_exclusive_group()
+    certs_ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
+    certs_ap.add_argument('--certs-from', metavar="LIST", help="Download trust list from given country's trust list service. Entries from later country overwrites earlier. Supported countries: DE, AT (comma separated list, default: DE,AT)", default='DE,AT')
+
     ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
     ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a qr-code.')
     ap.add_argument('ehc_code', nargs='*')
@@ -226,7 +274,7 @@ def main() -> None:
             if args.certs_file:
                 certs = load_ehc_certs(args.certs_file)
             else:
-                certs = download_ehc_certs()
+                certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')])
 
             valid = verify_ehc(ehc_msg, certs)
 

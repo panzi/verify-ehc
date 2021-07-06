@@ -37,7 +37,7 @@ Usage
 -----
 
 ```plain
-usage: verify_ehc.py [-h] [--certs-file FILE] [--no-verify] [--image] [ehc_code ...]
+usage: verify_ehc.py [-h] [--certs-file FILE | --certs-from LIST] [--no-verify] [--image] [ehc_code ...]
 
 positional arguments:
   ehc_code
@@ -45,6 +45,9 @@ positional arguments:
 optional arguments:
   -h, --help         show this help message and exit
   --certs-file FILE  Trust list in CBOR format. If not given it will be downloaded from the internet.
+  --certs-from LIST  Download trust list from given country's trust list service. Entries from later
+                     country overwrites earlier. Supported countries: DE, AT (comma separated list,
+                     default: DE,AT)
   --no-verify        Skip certificate verification.
   --image            Input is an image containing a qr-code.
 ```
