@@ -38,7 +38,7 @@ Usage
 
 ```plain
 usage: verify_ehc.py [-h] [--certs-file FILE | --certs-from LIST]
-                     [--no-verify | --debug-certs] [--image]
+                     [--no-verify | --list-certs] [--image]
                      [ehc_code ...]
 
 positional arguments:
@@ -53,6 +53,6 @@ optional arguments:
                      Supported countries: DE, AT (comma separated list,
                      default: DE,AT)
   --no-verify        Skip certificate verification.
-  --debug-certs      Keep debug trust list entries when verifying.
+  --list-certs       List certificates from trust list.
   --image            Input is an image containing a QR-code.
 ```

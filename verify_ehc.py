@@ -168,7 +168,7 @@ def load_ehc_certs_signed_json(data: bytes, pubkey: Optional[EllipticCurvePublic
 
     return certs
 
-def download_ehc_certs(sources: List[str], debug_certs: bool = False) -> CertList:
+def download_ehc_certs(sources: List[str]) -> CertList:
     certs = {}
 
     for source in sources:
@@ -200,11 +200,6 @@ def download_ehc_certs(sources: List[str], debug_certs: bool = False) -> CertLis
             certs.update(certs_de)
         else:
             raise ValueError(f'Unknown trust list source: {source}')
-
-    if not debug_certs:
-        for key_id in DEBUG_KEY_IDS:
-            if key_id in certs:
-                del certs[key_id]
 
     return certs
 
@@ -239,7 +234,9 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
     print(f'Cert Issuer    : {cert.issuer.rfc4514_string()}')
     print(f'Cert Subject   : {cert.subject.rfc4514_string()}')
     print(f'Cert Version   : name={cert.version.name}, value={cert.version.value}')
-    print(f'Cert Valid In  : {cert.not_valid_before.isoformat()} - {cert.not_valid_after.isoformat()}')
+    print( 'Cert Valid In  :',
+        cert.not_valid_before.isoformat() if cert.not_valid_before is not None else 'N/A', '-',
+        cert.not_valid_after.isoformat()  if cert.not_valid_after  is not None else 'N/A')
 
     now = datetime.now()
     cert_expired = now < cert.not_valid_before and now > cert.not_valid_after
@@ -305,18 +302,50 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+
     certs_ap = ap.add_mutually_exclusive_group()
     certs_ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
     certs_ap.add_argument('--certs-from', metavar="LIST", help="Download trust list from given country's trust list service. Entries from later country overwrites earlier. Supported countries: DE, AT (comma separated list, default: DE,AT)", default='DE,AT')
 
     verify_ap = ap.add_mutually_exclusive_group()
     verify_ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
-    verify_ap.add_argument('--debug-certs', action='store_true', default=False, help='Keep debug trust list entries when verifying.')
+    verify_ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
 
     ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a QR-code.')
     ap.add_argument('ehc_code', nargs='*')
 
     args = ap.parse_args()
+
+    certs: Optional[CertList] = None
+    if not args.no_verify:
+        if args.certs_file:
+            certs = load_ehc_certs(args.certs_file)
+        else:
+            certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')])
+
+        if args.list_certs:
+            items = list(certs.items())
+            items.sort(key=lambda item: (item[1].issuer.rfc4514_string(), item[1].subject.rfc4514_string(), item[0]))
+
+            for key_id, cert in items:
+                signature_algorithm_oid = cert.signature_algorithm_oid
+                print('Key ID          :', key_id.hex().rjust(16, '0'))
+                print('Serial          :', cert.serial_number)
+                print('Issuer          :', cert.issuer.rfc4514_string())
+                print('Subject         :', cert.subject.rfc4514_string())
+                print('Valid Date Range:',
+                    cert.not_valid_before.isoformat() if cert.not_valid_before is not None else 'N/A', '-',
+                    cert.not_valid_after.isoformat()  if cert.not_valid_after  is not None else 'N/A')
+                print(f'Version         : name={cert.version.name}, value={cert.version.value}')
+
+                pk = cert.public_key()
+                print(f'Key Type        : {type(pk).__name__.strip("_")}')
+                if isinstance(pk, EllipticCurvePublicKey):
+                    print( 'Curve           :', pk.curve.name)
+
+                print(f'Signature Algo. : oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
+                #print( 'Signature       : ', cert.signature.hex())
+                print()
 
     ehc_codes: List[str] = []
     if args.image:
@@ -351,12 +380,7 @@ def main() -> None:
             expires_at = datetime(1970, 1, 1) + timedelta(seconds=expires_at_int)
             print(f'Is Expired     :', datetime.now() >= expires_at)
 
-        if not args.no_verify:
-            if args.certs_file:
-                certs = load_ehc_certs(args.certs_file)
-            else:
-                certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')], args.debug_certs)
-
+        if certs is not None:
             verify_ehc(ehc_msg, certs)
 
         ehc = ehc_payload[-260][1]
