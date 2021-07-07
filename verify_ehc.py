@@ -239,6 +239,12 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
     print(f'Cert Issuer    : {cert.issuer.rfc4514_string()}')
     print(f'Cert Subject   : {cert.subject.rfc4514_string()}')
     print(f'Cert Version   : name={cert.version.name}, value={cert.version.value}')
+    print(f'Cert Valid In  : {cert.not_valid_before.isoformat()} - {cert.not_valid_after.isoformat()}')
+
+    now = datetime.now()
+    cert_expired = now < cert.not_valid_before and now > cert.not_valid_after
+
+    print(f'Cert Expired   : {cert_expired}')
 
     signature_algorithm_oid = cert.signature_algorithm_oid
     print(f'Signature Algo.: oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
@@ -291,7 +297,11 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
     else:
         raise KeyError(f'Unsupported public key type: {type(pk).__name__}')
 
-    return msg.verify_signature()
+    valid = msg.verify_signature()
+
+    print(f'Signature Valid: {valid}')
+
+    return valid and not cert_expired
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -347,9 +357,7 @@ def main() -> None:
             else:
                 certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')], args.debug_certs)
 
-            valid = verify_ehc(ehc_msg, certs)
-
-            print(f'Signature Valid: {valid}')
+            verify_ehc(ehc_msg, certs)
 
         ehc = ehc_payload[-260][1]
         
