@@ -207,9 +207,17 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
         raise KeyError(f'Key ID not found in cert list: {given_kid.hex()}')
 
     pk = cert.public_key()
-    print(f'Key type       : {type(pk).__name__.strip("_")}')
+    print(f'Key Type       : {type(pk).__name__.strip("_")}')
+    print(f'Cert Serial    : {cert.serial_number}')
+    print(f'Cert Issuer    : {cert.issuer.rfc4514_string()}')
+    print(f'Cert Subject   : {cert.subject.rfc4514_string()}')
+    print(f'Cert Version   : name={cert.version.name}, value={cert.version.value}')
+
+    signature_algorithm_oid = cert.signature_algorithm_oid
+    print(f'Signature Algo.: oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
 
     if isinstance(pk, EllipticCurvePublicKey):
+        print(f'Curve          : {pk.curve.name}')
         rsa_pn = pk.public_numbers()
         size = pk.curve.key_size // 8
 
