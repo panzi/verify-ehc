@@ -28,10 +28,13 @@ from cose.keys.keytype import KtyEC2, KtyRSA
 from cose.messages import CoseMessage # type: ignore
 from cose.algorithms import Ps256, Es256
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey, ECDSA
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 #from cryptography.hazmat.primitives.asymmetric.dsa import DSAPublicKey
+from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from pyzbar.pyzbar import decode as decode_qrcode # type: ignore
 from PIL import Image # type: ignore
 
@@ -78,7 +81,8 @@ OLD_SIGNS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/sigv2'
 CERTS_URL_AT = 'https://greencheck.gv.at/api/masterdata'
 
 # Trust List used by German Digitaler-Impfnachweis app:
-CERTS_URL_DE = 'https://de.dscg.ubirch.com/trustList/DSC/'
+CERTS_URL_DE  = 'https://de.dscg.ubirch.com/trustList/DSC/'
+PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/Certificates/PROD_RKI/CA/pubkey.pem'
 
 # Netherlands public keys:
 # https://www.npkd.nl/csca-health.html
@@ -127,14 +131,23 @@ def load_ehc_certs_cbor(cbor_data: bytes) -> CertList:
 
     return certs
 
-def load_ehc_certs_signed_json(data: bytes) -> CertList:
+def load_ehc_certs_signed_json(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = None) -> CertList:
     certs: CertList = {}
 
     sign_b64, body_json = data.split(b'\n', 1)
     sign = b64decode(sign_b64)
     body = json.loads(body_json)
 
-    # TODO: Verify signature. Where to get the public key from?
+    if pubkey is not None:
+        r = int.from_bytes(sign[:len(sign)//2], byteorder="big", signed=False)
+        s = int.from_bytes(sign[len(sign)//2:], byteorder="big", signed=False)
+
+        sign_dds = encode_dss_signature(r, s)
+
+        try:
+            pubkey.verify(sign_dds, body_json, ECDSA(hashes.SHA256()))
+        except InvalidSignature:
+            raise ValueError(f'Invalid signature DE trust list: {sign.hex()}')
 
     for cert in body['certificates']:
         key_id    = b64decode(cert['kid'])
@@ -169,7 +182,21 @@ def download_ehc_certs(sources: List[str], debug_certs: bool = False) -> CertLis
             response = requests.get(CERTS_URL_DE)
             response.raise_for_status()
             certs_signed_json = response.content
-            certs_de = load_ehc_certs_signed_json(certs_signed_json)
+
+            pubkey: Optional[EllipticCurvePublicKey] = None
+            response = requests.get(PUBKEY_URL_DE)
+            if response.status_code == 404:
+                print(f'{PUBKEY_URL_DE} pubkey for German trust list not found (404)!', file=sys.stderr)
+            else:
+                response.raise_for_status()
+                res_pubkey = load_pem_public_key(response.content)
+
+                if not isinstance(res_pubkey, EllipticCurvePublicKey):
+                    print(f'{PUBKEY_URL_DE} is expected to be an EllipticCurvePublicKey but actually is {type(res_pubkey).__name__}', file=sys.stderr)
+                else:
+                    pubkey = res_pubkey
+
+            certs_de = load_ehc_certs_signed_json(certs_signed_json, pubkey)
             certs.update(certs_de)
         else:
             raise ValueError(f'Unknown trust list source: {source}')
