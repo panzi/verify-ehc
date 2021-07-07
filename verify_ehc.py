@@ -83,10 +83,10 @@ CERTS_URL_DE = 'https://de.dscg.ubirch.com/trustList/DSC/'
 # Netherlands public keys:
 # https://www.npkd.nl/csca-health.html
 
-# Keys from a French validation app, don't know if that is something official or a hobby project by someone:
+# Keys from a French validation app (nothing official, just a hobby project by someone):
 # https://github.com/lovasoa/sanipasse/blob/master/src/assets/Digital_Green_Certificate_Signing_Keys.json
 
-# Sweden:
+# Sweden (JOSE encoded):
 # https://dgcg.covidbevis.se/tp/trust-list
 
 # See also this thread:
