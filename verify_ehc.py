@@ -9,6 +9,7 @@ import re
 import argparse
 import codecs
 
+from os.path import splitext
 from datetime import date, datetime, timedelta
 from base64 import b64decode, b64encode, urlsafe_b64decode
 
@@ -29,11 +30,11 @@ from cose.keys.keytype import KtyEC2, KtyRSA
 from cose.messages import CoseMessage # type: ignore
 from cose.algorithms import Ps256, Es256
 from cryptography import x509
-from cryptography.x509 import CertificateBuilder, NameAttribute, Name, Version
+from cryptography.x509 import CertificateBuilder, NameAttribute, Name, Version, load_der_x509_certificate
 from cryptography.x509.oid import NameOID, ObjectIdentifier, SignatureAlgorithmOID
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.serialization import Encoding, load_pem_public_key
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey, EllipticCurvePublicNumbers, ECDSA, SECP256R1
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 #from cryptography.hazmat.primitives.asymmetric.dsa import DSAPublicKey
@@ -47,87 +48,6 @@ from PIL import Image # type: ignore
 # But where is it hosted?
 
 EPOCH = datetime(1970, 1, 1)
-
-class HackCertificate(x509.Certificate):
-    _public_key: Union[EllipticCurvePublicKey, RSAPublicKey]
-    _signature_algorithm_oid: ObjectIdentifier
-    _issuer: Name
-    _subject: Name
-    _signature: bytes
-
-    def __init__(self,
-        public_key: Union[EllipticCurvePublicKey, RSAPublicKey],
-        signature_algorithm_oid: ObjectIdentifier,
-        issuer: Name,
-        subject: Name,
-        signature: bytes,
-    ):
-        self._public_key = public_key
-        self._signature_algorithm_oid = signature_algorithm_oid
-        self._issuer = issuer
-        self._subject = subject
-
-    def fingerprint(self, algorithm: hashes.HashAlgorithm) -> bytes:
-        raise NotImplementedError
-
-    @property
-    def extensions(self):
-        raise NotImplementedError
-
-    @property
-    def signature(self) -> bytes:
-        return self._signature
-
-    @property
-    def tbs_certificate_bytes(self) -> bytes:
-        raise NotImplementedError
-
-    def __eq__(self, other: object) -> bool:
-        return self is other
-
-    def __ne__(self, other: object) -> bool:
-        return self is not other
-
-    def __hash__(self) -> int:
-        raise NotImplementedError
-
-    @property
-    def serial_number(self):
-        return None
-
-    @property
-    def issuer(self):
-        return self._issuer
-
-    @property
-    def subject(self):
-        return self._subject
-
-    @property
-    def version(self):
-        return Version.v1
-
-    @property
-    def signature_algorithm_oid(self):
-        return self._signature_algorithm_oid
-
-    @property
-    def signature_hash_algorithm(self):
-        raise NotImplementedError
-
-    @property
-    def not_valid_before(self):
-        return None
-
-    @property
-    def not_valid_after(self):
-        return None
-
-    def public_key(self):
-        return self._public_key
-
-    def public_bytes(self, encoding):
-        return self._public_key.public_bytes(encoding)
 
 CertList = Dict[bytes, x509.Certificate]
 
@@ -208,7 +128,7 @@ def load_ehc_certs_cbor(cbor_data: bytes) -> CertList:
     for item in certs_data['c']:
         key_id = item['i']
         cert_data = item['c']
-        cert = x509.load_der_x509_certificate(cert_data)
+        cert = load_der_x509_certificate(cert_data)
         fingerprint = cert.fingerprint(hashes.SHA256())
         if key_id != fingerprint[0:8]:
             raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
@@ -245,7 +165,7 @@ def load_ehc_certs_signed_json(data: bytes, pubkey: Optional[EllipticCurvePublic
 
         raw_data = b64decode(cert['rawData'])
 
-        cert = x509.load_der_x509_certificate(raw_data)
+        cert = load_der_x509_certificate(raw_data)
         fingerprint = cert.fingerprint(hashes.SHA256())
         if key_id != fingerprint[0:8]:
             raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
@@ -301,50 +221,16 @@ def download_ehc_certs(sources: List[str]) -> CertList:
 
             for country, country_keys in token['dsc_trust_list'].items():
                 for entry in country_keys['keys']:
-                    key_type = entry['kty']
                     key_id = b64decode(entry['kid'])
-                    x5c = [b64decode_ignore_padding(key_data) for key_data in entry['x5c']]
-                    signature = urlsafe_b64decode_ignore_padding(entry['x5t#S256'])
-                    pubkey_sw: Union[EllipticCurvePublicKey, RSAPublicKey]
+                    for key_data in entry['x5c']:
+                        cert = load_der_x509_certificate(b64decode_ignore_padding(key_data))
 
-                    if key_type == 'EC':
-                        curve_name = entry['crv']
-                        curve = CURVE_MAP[curve_name]()
+                        fingerprint = cert.fingerprint(hashes.SHA256())
+                        if key_id != fingerprint[0:8]:
+                            raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
-                        x_bytes = urlsafe_b64decode_ignore_padding(entry['x'])
-                        y_bytes = urlsafe_b64decode_ignore_padding(entry['y'])
+                        certs[key_id] = cert
 
-                        x = int.from_bytes(x_bytes, byteorder="big", signed=False)
-                        y = int.from_bytes(y_bytes, byteorder="big", signed=False)
-
-                        pubkey_sw = EllipticCurvePublicNumbers(x, y, curve).public_key()
-
-                        # XXX: not always correct! (but not used except for --list-certs)
-                        signature_algorithm_oid = SignatureAlgorithmOID.ECDSA_WITH_SHA256
-
-                    elif key_type == 'RSA':
-                        e_bytes = urlsafe_b64decode_ignore_padding(entry['e'])
-                        n_bytes = urlsafe_b64decode_ignore_padding(entry['n'])
-
-                        e = int.from_bytes(e_bytes, byteorder="big", signed=False)
-                        n = int.from_bytes(n_bytes, byteorder="big", signed=False)
-
-                        pubkey_sw = RSAPublicNumbers(e, n).public_key()
-
-                        # XXX: not always correct! (but not used except for --list-certs)
-                        signature_algorithm_oid = SignatureAlgorithmOID.RSASSA_PSS
-                    else:
-                        print(f'{CERTS_URL_SW} has unexpected public key type: {key_type!r}')
-                        continue
-
-                    cert = HackCertificate(
-                        public_key=pubkey_sw,
-                        signature_algorithm_oid=signature_algorithm_oid,
-                        issuer=Name([NameAttribute(NameOID.COUNTRY_NAME, country)]),
-                        subject=Name([NameAttribute(NameOID.COUNTRY_NAME, country)]),
-                        signature=signature,
-                    )
-                    certs[key_id] = cert
         else:
             raise ValueError(f'Unknown trust list source: {source}')
 
@@ -466,7 +352,10 @@ def main() -> None:
 
     verify_ap = ap.add_mutually_exclusive_group()
     verify_ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
-    verify_ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
+
+    certs_at = verify_ap.add_argument_group()
+    certs_at.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
+    certs_at.add_argument('--save-certs', metavar='FILE', help='Store downloaded certificates to FILE. Filetype is derived from extension, whcih can be .json or .cbor')
 
     ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a QR-code.')
     ap.add_argument('ehc_code', nargs='*')
@@ -479,6 +368,22 @@ def main() -> None:
             certs = load_ehc_certs(args.certs_file)
         else:
             certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')])
+
+        if args.save_certs:
+            ext = splitext(args.save_certs)[1]
+            lower_ext = ext.lower()
+            if lower_ext == '.json':
+                # TODO: JSON that includes all info in a format as needed by WebCrypto
+                raise NotImplementedError
+            elif lower_ext == '.cbor':
+                # same CBOR format as AT trust list
+                with open(args.save_certs, 'wb') as fp:
+                    cbor2.dump({'c': [
+                        {'i': key_id, 'c': cert.public_bytes(Encoding.DER)}
+                        for key_id, cert in certs.items()
+                    ]}, fp)
+            else:
+                raise ValueError(f'Unsupported certificates file extension: {ext!r}')
 
         if args.list_certs:
             items = list(certs.items())
