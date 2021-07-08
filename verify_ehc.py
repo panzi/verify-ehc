@@ -386,9 +386,16 @@ def main() -> None:
 
                     # even less sure about this:
                     if pubkey_json['kty'] == 'EC':
-                        algo_name = 'ECDSA'
+                        algo = {
+                            'name': 'ECDSA',
+                            'namedCurve': pubkey_json['crv'],
+                            'hash': {'name': "SHA-256"},
+                        }
                     else:
-                        algo_name = 'RSASSA-PKCS1-v1_5'
+                        algo = {
+                            'name': 'RSASSA-PKCS1-v1_5',
+                            'hash': {'name': "SHA-256"},
+                        }
 
                     cert_json = {
                         'issuer':  cert.issuer.rfc4514_string(),
@@ -396,10 +403,7 @@ def main() -> None:
                         'notValidBefore': cert.not_valid_before.isoformat(),
                         'notValidAfter':  cert.not_valid_after.isoformat(),
                         'publicKey': pubkey_json,
-                        'algorithm': {
-                            'name': algo_name,
-                            'hash': {'name': "SHA-256"},
-                        },
+                        'algorithm': algo,
                     }
 
                     certs_json[key_id.hex()] = cert_json
