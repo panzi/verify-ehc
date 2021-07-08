@@ -30,12 +30,12 @@ from cose.keys.keytype import KtyEC2, KtyRSA
 from cose.messages import CoseMessage # type: ignore
 from cose.algorithms import Ps256, Es256
 from cryptography import x509
-from cryptography.x509 import CertificateBuilder, NameAttribute, Name, Version, load_der_x509_certificate
+from cryptography.x509 import load_der_x509_certificate
 from cryptography.x509.oid import NameOID, ObjectIdentifier, SignatureAlgorithmOID
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import Encoding, load_pem_public_key
-from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey, EllipticCurvePublicNumbers, ECDSA, SECP256R1
+from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey, EllipticCurvePublicNumbers, ECDSA
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 #from cryptography.hazmat.primitives.asymmetric.dsa import DSAPublicKey
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
@@ -173,11 +173,6 @@ def load_ehc_certs_signed_json(data: bytes, pubkey: Optional[EllipticCurvePublic
         certs[key_id] = cert
 
     return certs
-
-CURVE_MAP: Dict[str, type] = {
-    'P-256': SECP256R1,
-    # more?
-}
 
 def download_ehc_certs(sources: List[str]) -> CertList:
     certs = {}
