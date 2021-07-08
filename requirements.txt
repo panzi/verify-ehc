@@ -8,3 +8,4 @@ pyzbar
 requests
 pillow
 python-jose[cryptography]
+jwcrypto

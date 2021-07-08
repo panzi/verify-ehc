@@ -11,7 +11,7 @@ import codecs
 
 from os.path import splitext
 from datetime import date, datetime, timedelta
-from base64 import b64decode, b64encode, urlsafe_b64decode
+from base64 import b64decode, b64encode, urlsafe_b64decode, urlsafe_b64encode
 
 import cbor2 # type: ignore
 import cose.algorithms # type: ignore
@@ -350,12 +350,10 @@ def main() -> None:
     certs_ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
     certs_ap.add_argument('--certs-from', metavar="LIST", help="Download trust list from given country's trust list service. Entries from later country overwrites earlier. Supported countries: DE, AT, SW (comma separated list, default: DE,AT)", default='DE,AT')
 
-    verify_ap = ap.add_mutually_exclusive_group()
-    verify_ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
+    ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
 
-    certs_at = verify_ap.add_argument_group()
-    certs_at.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
-    certs_at.add_argument('--save-certs', metavar='FILE', help='Store downloaded certificates to FILE. Filetype is derived from extension, whcih can be .json or .cbor')
+    ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
+    ap.add_argument('--save-certs', metavar='FILE', help='Store downloaded certificates to FILE. Filetype is derived from extension, whcih can be .json or .cbor')
 
     ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a QR-code.')
     ap.add_argument('ehc_code', nargs='*')
@@ -363,7 +361,7 @@ def main() -> None:
     args = ap.parse_args()
 
     certs: Optional[CertList] = None
-    if not args.no_verify:
+    if not args.no_verify or args.save_certs or args.list_certs:
         if args.certs_file:
             certs = load_ehc_certs(args.certs_file)
         else:
@@ -373,8 +371,42 @@ def main() -> None:
             ext = splitext(args.save_certs)[1]
             lower_ext = ext.lower()
             if lower_ext == '.json':
-                # TODO: JSON that includes all info in a format as needed by WebCrypto
-                raise NotImplementedError
+                from jwcrypto.jwk import JWK # type: ignore
+
+                # JSON that includes all info in a format as needed by WebCrypto, I hope
+                certs_json = {}
+                for key_id, cert in certs.items():
+                    pubkey = cert.public_key()
+                    pubkey_jwk = JWK.from_pyca(pubkey)
+                    pubkey_json = pubkey_jwk.export(as_dict=True, private_key=False)
+                    pubkey_json['key_ops'] = ['verify']
+
+                    # not sure about this:
+                    pubkey_json['kid'] = urlsafe_b64encode(key_id).decode('ASCII')
+
+                    # even less sure about this:
+                    if pubkey_json['kty'] == 'EC':
+                        algo_name = 'ECDSA'
+                    else:
+                        algo_name = 'RSASSA-PKCS1-v1_5'
+
+                    cert_json = {
+                        'issuer':  cert.issuer.rfc4514_string(),
+                        'subject': cert.subject.rfc4514_string(),
+                        'notValidBefore': cert.not_valid_before.isoformat(),
+                        'notValidAfter':  cert.not_valid_after.isoformat(),
+                        'publicKey': pubkey_json,
+                        'algorithm': {
+                            'name': algo_name,
+                            'hash': {'name': "SHA-256"},
+                        },
+                    }
+
+                    certs_json[key_id.hex()] = cert_json
+
+                with open(args.save_certs, 'w') as text_stream:
+                    json.dump({'trustList': certs_json}, text_stream)
+
             elif lower_ext == '.cbor':
                 # same CBOR format as AT trust list
                 with open(args.save_certs, 'wb') as fp:
@@ -421,6 +453,9 @@ def main() -> None:
                 print(f'{filename}: no qr-code found', file=sys.stderr)
     else:
         ehc_codes.extend(args.ehc_code)
+
+    if args.no_verify:
+        certs = None
 
     for ehc_code in ehc_codes:
         ehc_msg = decode_ehc(ehc_code)
