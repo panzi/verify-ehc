@@ -46,6 +46,8 @@ from PIL import Image # type: ignore
 # Digital Green Certificate Gateway API SPEC: https://eu-digital-green-certificates.github.io/dgc-gateway/#/Trust%20Lists/downloadTrustList
 # But where is it hosted?
 
+EPOCH = datetime(1970, 1, 1)
+
 class HackCertificate(x509.Certificate):
     _public_key: Union[EllipticCurvePublicKey, RSAPublicKey]
     _signature_algorithm_oid: ObjectIdentifier
@@ -371,7 +373,7 @@ def decode_ehc(b45_data: str) -> CoseMessage:
     msg: CoseMessage = CoseMessage.decode(data)
     return msg
 
-def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
+def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList) -> bool:
     given_kid = msg.phdr.get(KID) or msg.uhdr[KID]
     print(f'Key ID         : {given_kid.hex()} / {b64encode(given_kid).decode("ASCII")}')
 
@@ -389,12 +391,11 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
         cert.not_valid_before.isoformat() if cert.not_valid_before is not None else 'N/A', '-',
         cert.not_valid_after.isoformat()  if cert.not_valid_after  is not None else 'N/A')
 
-    now = datetime.now()
     cert_expired = False
-    if cert.not_valid_before is not None and now < cert.not_valid_before:
+    if cert.not_valid_before is not None and issued_at < cert.not_valid_before:
         cert_expired = True
 
-    if cert.not_valid_after is not None and now > cert.not_valid_after:
+    if cert.not_valid_after is not None and issued_at > cert.not_valid_after:
         cert_expired = True
 
     print(f'Cert Expired   : {cert_expired}')
@@ -525,19 +526,21 @@ def main() -> None:
                 if key in CLAIM_NAMES:
                     name = CLAIM_NAMES[key]
                     if key in DATETIME_CLAIMS:
-                        dt = datetime(1970, 1, 1) + timedelta(seconds=value)
+                        dt = EPOCH + timedelta(seconds=value)
                         value = dt.isoformat()
                 else:
                     name = f'Claim {key} (unknown)'
                 print(f'{name:15}: {value}')
 
+        issued_at = EPOCH + timedelta(seconds=ehc_payload[6])
+
         expires_at_int = ehc_payload.get(4)
         if expires_at_int is not None:
-            expires_at = datetime(1970, 1, 1) + timedelta(seconds=expires_at_int)
+            expires_at = EPOCH + timedelta(seconds=expires_at_int)
             print(f'Is Expired     :', datetime.now() >= expires_at)
 
         if certs is not None:
-            verify_ehc(ehc_msg, certs)
+            verify_ehc(ehc_msg, issued_at, certs)
 
         ehc = ehc_payload[-260][1]
         
