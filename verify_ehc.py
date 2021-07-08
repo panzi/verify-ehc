@@ -348,7 +348,7 @@ def main() -> None:
     ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
 
     ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
-    ap.add_argument('--save-certs', metavar='FILE', help='Store downloaded certificates to FILE. Filetype is derived from extension, whcih can be .json or .cbor')
+    ap.add_argument('--save-certs', metavar='FILE', help='Store downloaded certificates to FILE. The filetype is derived from the extension, which can be .json or .cbor')
 
     ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a QR-code.')
     ap.add_argument('ehc_code', nargs='*')

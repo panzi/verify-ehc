@@ -54,6 +54,9 @@ optional arguments:
                      Supported countries: DE, AT, SW (comma separated list,
                      default: DE,AT)
   --no-verify        Skip certificate verification.
+  --list-certs       List certificates from trust list.
+  --save-certs FILE  Store downloaded certificates to FILE. The filetype is
+                     derived from the extension, which can be .json or .cbor
   --image            Input is an image containing a QR-code.
 ```
 
