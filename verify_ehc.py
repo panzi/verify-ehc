@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Tuple, Any, Dict, Optional, List, FrozenSet
+from typing import Tuple, Any, Dict, Optional, List, FrozenSet, Union
 
 import json
 import sys
@@ -10,7 +10,7 @@ import argparse
 import codecs
 
 from datetime import date, datetime, timedelta
-from base64 import b64decode, b64encode
+from base64 import b64decode, b64encode, urlsafe_b64decode
 
 import cbor2 # type: ignore
 import cose.algorithms # type: ignore
@@ -18,6 +18,7 @@ import cose.keys.curves # type: ignore
 import cose.keys.keytype # type: ignore
 import requests
 
+from jose import jwt # type: ignore
 from base45 import b45decode # type: ignore
 from cose.headers import KID # type: ignore
 from cose.keys import CoseKey
@@ -28,11 +29,13 @@ from cose.keys.keytype import KtyEC2, KtyRSA
 from cose.messages import CoseMessage # type: ignore
 from cose.algorithms import Ps256, Es256
 from cryptography import x509
+from cryptography.x509 import CertificateBuilder, NameAttribute, Name, Version
+from cryptography.x509.oid import NameOID, ObjectIdentifier, SignatureAlgorithmOID
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
-from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey, ECDSA
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey, EllipticCurvePublicNumbers, ECDSA, SECP256R1
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 #from cryptography.hazmat.primitives.asymmetric.dsa import DSAPublicKey
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from pyzbar.pyzbar import decode as decode_qrcode # type: ignore
@@ -42,6 +45,87 @@ from PIL import Image # type: ignore
 
 # Digital Green Certificate Gateway API SPEC: https://eu-digital-green-certificates.github.io/dgc-gateway/#/Trust%20Lists/downloadTrustList
 # But where is it hosted?
+
+class HackCertificate(x509.Certificate):
+    _public_key: Union[EllipticCurvePublicKey, RSAPublicKey]
+    _signature_algorithm_oid: ObjectIdentifier
+    _issuer: Name
+    _subject: Name
+    _signature: bytes
+
+    def __init__(self,
+        public_key: Union[EllipticCurvePublicKey, RSAPublicKey],
+        signature_algorithm_oid: ObjectIdentifier,
+        issuer: Name,
+        subject: Name,
+        signature: bytes,
+    ):
+        self._public_key = public_key
+        self._signature_algorithm_oid = signature_algorithm_oid
+        self._issuer = issuer
+        self._subject = subject
+
+    def fingerprint(self, algorithm: hashes.HashAlgorithm) -> bytes:
+        raise NotImplementedError
+
+    @property
+    def extensions(self):
+        raise NotImplementedError
+
+    @property
+    def signature(self) -> bytes:
+        return self._signature
+
+    @property
+    def tbs_certificate_bytes(self) -> bytes:
+        raise NotImplementedError
+
+    def __eq__(self, other: object) -> bool:
+        return self is other
+
+    def __ne__(self, other: object) -> bool:
+        return self is not other
+
+    def __hash__(self) -> int:
+        raise NotImplementedError
+
+    @property
+    def serial_number(self):
+        return None
+
+    @property
+    def issuer(self):
+        return self._issuer
+
+    @property
+    def subject(self):
+        return self._subject
+
+    @property
+    def version(self):
+        return Version.v1
+
+    @property
+    def signature_algorithm_oid(self):
+        return self._signature_algorithm_oid
+
+    @property
+    def signature_hash_algorithm(self):
+        raise NotImplementedError
+
+    @property
+    def not_valid_before(self):
+        return None
+
+    @property
+    def not_valid_after(self):
+        return None
+
+    def public_key(self):
+        return self._public_key
+
+    def public_bytes(self, encoding):
+        return self._public_key.public_bytes(encoding)
 
 CertList = Dict[bytes, x509.Certificate]
 
@@ -91,7 +175,7 @@ PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/
 # https://github.com/lovasoa/sanipasse/blob/master/src/assets/Digital_Green_Certificate_Signing_Keys.json
 
 # Sweden (JOSE encoded):
-# https://dgcg.covidbevis.se/tp/trust-list
+CERTS_URL_SW = 'https://dgcg.covidbevis.se/tp/trust-list'
 
 # See also this thread:
 # https://github.com/eu-digital-green-certificates/dgc-participating-countries/issues/10
@@ -168,16 +252,23 @@ def load_ehc_certs_signed_json(data: bytes, pubkey: Optional[EllipticCurvePublic
 
     return certs
 
+CURVE_MAP: Dict[str, type] = {
+    'P-256': SECP256R1,
+    # more?
+}
+
 def download_ehc_certs(sources: List[str]) -> CertList:
     certs = {}
 
     for source in sources:
         if source == 'AT':
+            # TODO: find out how to verify signature?
             response = requests.get(CERTS_URL_AT)
             response.raise_for_status()
             certs_cbor = b64decode(json.loads(response.content)['trustList']['trustListContent'])
             certs_at = load_ehc_certs_cbor(certs_cbor)
             certs.update(certs_at)
+
         elif source == 'DE':
             response = requests.get(CERTS_URL_DE)
             response.raise_for_status()
@@ -198,10 +289,70 @@ def download_ehc_certs(sources: List[str]) -> CertList:
 
             certs_de = load_ehc_certs_signed_json(certs_signed_json, pubkey)
             certs.update(certs_de)
+
+        elif source == 'SW':
+            # TODO: find out how to verify signature?
+            response = requests.get(CERTS_URL_SW)
+            response.raise_for_status()
+            token_str = response.content.decode('UTF-8')
+            token = jwt.get_unverified_claims(token_str)
+
+            for country, country_keys in token['dsc_trust_list'].items():
+                for entry in country_keys['keys']:
+                    key_type = entry['kty']
+                    key_id = b64decode(entry['kid'])
+                    x5c = [b64decode_ignore_padding(key_data) for key_data in entry['x5c']]
+                    signature = urlsafe_b64decode_ignore_padding(entry['x5t#S256'])
+                    pubkey_sw: Union[EllipticCurvePublicKey, RSAPublicKey]
+
+                    if key_type == 'EC':
+                        curve_name = entry['crv']
+                        curve = CURVE_MAP[curve_name]()
+
+                        x_bytes = urlsafe_b64decode_ignore_padding(entry['x'])
+                        y_bytes = urlsafe_b64decode_ignore_padding(entry['y'])
+
+                        x = int.from_bytes(x_bytes, byteorder="big", signed=False)
+                        y = int.from_bytes(y_bytes, byteorder="big", signed=False)
+
+                        pubkey_sw = EllipticCurvePublicNumbers(x, y, curve).public_key()
+
+                        # XXX: not always correct! (but not used except for --list-certs)
+                        signature_algorithm_oid = SignatureAlgorithmOID.ECDSA_WITH_SHA256
+
+                    elif key_type == 'RSA':
+                        e_bytes = urlsafe_b64decode_ignore_padding(entry['e'])
+                        n_bytes = urlsafe_b64decode_ignore_padding(entry['n'])
+
+                        e = int.from_bytes(e_bytes, byteorder="big", signed=False)
+                        n = int.from_bytes(n_bytes, byteorder="big", signed=False)
+
+                        pubkey_sw = RSAPublicNumbers(e, n).public_key()
+
+                        # XXX: not always correct! (but not used except for --list-certs)
+                        signature_algorithm_oid = SignatureAlgorithmOID.RSASSA_PSS
+                    else:
+                        print(f'{CERTS_URL_SW} has unexpected public key type: {key_type!r}')
+                        continue
+
+                    cert = HackCertificate(
+                        public_key=pubkey_sw,
+                        signature_algorithm_oid=signature_algorithm_oid,
+                        issuer=Name([NameAttribute(NameOID.COUNTRY_NAME, country)]),
+                        subject=Name([NameAttribute(NameOID.COUNTRY_NAME, country)]),
+                        signature=signature,
+                    )
+                    certs[key_id] = cert
         else:
             raise ValueError(f'Unknown trust list source: {source}')
 
     return certs
+
+def b64decode_ignore_padding(b64str: str) -> bytes:
+    return b64decode(b64str + "=" * ((4 - len(b64str) % 4) % 4))
+
+def urlsafe_b64decode_ignore_padding(b64str: str) -> bytes:
+    return urlsafe_b64decode(b64str + "=" * ((4 - len(b64str) % 4) % 4))
 
 def decode_ehc(b45_data: str) -> CoseMessage:
     if b45_data.startswith('HC1'):
@@ -233,13 +384,18 @@ def verify_ehc(msg: CoseMessage, certs: CertList) -> bool:
     print(f'Cert Serial    : {cert.serial_number}')
     print(f'Cert Issuer    : {cert.issuer.rfc4514_string()}')
     print(f'Cert Subject   : {cert.subject.rfc4514_string()}')
-    print(f'Cert Version   : name={cert.version.name}, value={cert.version.value}')
+    print(f'Cert Version   : {cert.version.name}')
     print( 'Cert Valid In  :',
         cert.not_valid_before.isoformat() if cert.not_valid_before is not None else 'N/A', '-',
         cert.not_valid_after.isoformat()  if cert.not_valid_after  is not None else 'N/A')
 
     now = datetime.now()
-    cert_expired = now < cert.not_valid_before and now > cert.not_valid_after
+    cert_expired = False
+    if cert.not_valid_before is not None and now < cert.not_valid_before:
+        cert_expired = True
+
+    if cert.not_valid_after is not None and now > cert.not_valid_after:
+        cert_expired = True
 
     print(f'Cert Expired   : {cert_expired}')
 
@@ -305,7 +461,7 @@ def main() -> None:
 
     certs_ap = ap.add_mutually_exclusive_group()
     certs_ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
-    certs_ap.add_argument('--certs-from', metavar="LIST", help="Download trust list from given country's trust list service. Entries from later country overwrites earlier. Supported countries: DE, AT (comma separated list, default: DE,AT)", default='DE,AT')
+    certs_ap.add_argument('--certs-from', metavar="LIST", help="Download trust list from given country's trust list service. Entries from later country overwrites earlier. Supported countries: DE, AT, SW (comma separated list, default: DE,AT)", default='DE,AT')
 
     verify_ap = ap.add_mutually_exclusive_group()
     verify_ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
@@ -336,7 +492,7 @@ def main() -> None:
                 print('Valid Date Range:',
                     cert.not_valid_before.isoformat() if cert.not_valid_before is not None else 'N/A', '-',
                     cert.not_valid_after.isoformat()  if cert.not_valid_after  is not None else 'N/A')
-                print(f'Version         : name={cert.version.name}, value={cert.version.value}')
+                print('Version         :', cert.version.name)
 
                 pk = cert.public_key()
                 print(f'Key Type        : {type(pk).__name__.strip("_")}')
