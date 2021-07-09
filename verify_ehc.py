@@ -188,7 +188,15 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             certs_json = json.loads(response.content)['trustList']
             certs_cbor = b64decode(certs_json['trustListContent'])
             certs_sig  = b64decode(certs_json['trustListSignature'])
-            certs_at = load_ehc_certs_cbor(certs_cbor)
+            certs_at   = load_ehc_certs_cbor(certs_cbor)
+
+            certs_sig_cbor = cbor2.loads(certs_sig)
+            certs_sign = certs_sig_cbor.value[3]
+
+            mid = len(certs_sign)//2
+            r = int.from_bytes(certs_sign[:mid], byteorder="big", signed=False)
+            s = int.from_bytes(certs_sign[mid:], byteorder="big", signed=False)
+            certs_sign_dds = encode_dss_signature(r, s)
 
             response = requests.get('https://greencheck.gv.at/')
             response.raise_for_status()
@@ -204,8 +212,23 @@ def download_ehc_certs(sources: List[str]) -> CertList:
                     if match:
                         certs_pems_js = match.group(1)
                         certs_pems_js = ESC.sub(lambda match: chr(int(match[1], 16)), certs_pems_js)
-                        meta_certs = {k: load_pem_x509_certificate(v.encode()) for k, v in json.loads(certs_pems_js).items()}
-                        # TODO
+                        # TODO: compare certs_sig_cbor.value[2] with a hash of certs_cbor?
+
+                        for meta_cert_key, meta_cert_src in json.loads(certs_pems_js).items():
+                            meta_cert = load_pem_x509_certificate(meta_cert_src.encode())
+
+                            pubkey_at = meta_cert.public_key()
+
+                            if isinstance(pubkey_at, EllipticCurvePublicKey):
+                                try:
+                                    # XXX: none work, also when using certs_sign
+                                    pubkey_at.verify(certs_sign_dds, certs_sig_cbor.value[2], ECDSA(hashes.SHA256()))
+                                except Exception as error:
+                                    print(meta_cert_key, 'ERROR', type(error).__name__)
+                                else:
+                                    print(meta_cert_key, 'SUCCESS')
+                            else:
+                                print(meta_cert_key, 'ERROR', 'not elliptic curve public key:', type(pubkey_at).__name__.strip('_'))
                     break
 
             certs.update(certs_at)
