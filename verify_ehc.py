@@ -21,7 +21,7 @@ import requests
 
 from jose import jwt # type: ignore
 from base45 import b45decode # type: ignore
-from cose.headers import KID # type: ignore
+from cose.headers import KID, Algorithm # type: ignore
 from cose.keys import CoseKey
 from cose.keys.curves import CoseCurve, P256, P384, P521
 from cose.keys.keyops import VerifyOp # type: ignore
@@ -255,6 +255,9 @@ def decode_ehc(b45_data: str) -> CoseMessage:
     return msg
 
 def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList) -> bool:
+    cose_algo = msg.phdr.get(Algorithm)
+    print(f'COSE Sig. Algo.: {cose_algo.fullname if cose_algo is not None else "N/A"}')
+
     given_kid = msg.phdr.get(KID) or msg.uhdr[KID]
     print(f'Key ID         : {given_kid.hex()} / {b64encode(given_kid).decode("ASCII")}')
 
