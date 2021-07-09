@@ -22,7 +22,7 @@ import requests
 from lxml.html import fromstring as parse_html # type: ignore
 from jose import jwt # type: ignore
 from base45 import b45decode # type: ignore
-from cose.headers import KID # type: ignore
+from cose.headers import KID, Algorithm # type: ignore
 from cose.keys import CoseKey
 from cose.keys.curves import CoseCurve, P256, P384, P521
 from cose.keys.keyops import VerifyOp # type: ignore
@@ -279,6 +279,9 @@ def decode_ehc(b45_data: str) -> CoseMessage:
     return msg
 
 def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList) -> bool:
+    cose_algo = msg.phdr.get(Algorithm)
+    print(f'COSE Sig. Algo.: {cose_algo.fullname if cose_algo is not None else "N/A"}')
+
     given_kid = msg.phdr.get(KID) or msg.uhdr[KID]
     print(f'Key ID         : {given_kid.hex()} / {b64encode(given_kid).decode("ASCII")}')
 
@@ -446,7 +449,7 @@ def main() -> None:
 
             for key_id, cert in items:
                 signature_algorithm_oid = cert.signature_algorithm_oid
-                print('Key ID          :', key_id.hex().rjust(16, '0'))
+                print('Key ID          :', key_id.hex(), '/', b64encode(key_id).decode("ASCII"))
                 print('Serial          :', cert.serial_number)
                 print('Issuer          :', cert.issuer.rfc4514_string())
                 print('Subject         :', cert.subject.rfc4514_string())
@@ -486,8 +489,8 @@ def main() -> None:
 
         for key, value in ehc_payload.items():
             if key != -260:
-                if key in CLAIM_NAMES:
-                    name = CLAIM_NAMES[key]
+                name = CLAIM_NAMES.get(key)
+                if name is not None:
                     if key in DATETIME_CLAIMS:
                         dt = EPOCH + timedelta(seconds=value)
                         value = dt.isoformat()
