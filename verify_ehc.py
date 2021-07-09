@@ -425,7 +425,7 @@ def main() -> None:
 
             for key_id, cert in items:
                 signature_algorithm_oid = cert.signature_algorithm_oid
-                print('Key ID          :', key_id.hex().rjust(16, '0'))
+                print('Key ID          :', key_id.hex(), '/', b64encode(key_id).decode("ASCII"))
                 print('Serial          :', cert.serial_number)
                 print('Issuer          :', cert.issuer.rfc4514_string())
                 print('Subject         :', cert.subject.rfc4514_string())
@@ -465,8 +465,8 @@ def main() -> None:
 
         for key, value in ehc_payload.items():
             if key != -260:
-                if key in CLAIM_NAMES:
-                    name = CLAIM_NAMES[key]
+                name = CLAIM_NAMES.get(key)
+                if name is not None:
                     if key in DATETIME_CLAIMS:
                         dt = EPOCH + timedelta(seconds=value)
                         value = dt.isoformat()
