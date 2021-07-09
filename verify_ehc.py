@@ -19,6 +19,7 @@ import cose.keys.curves # type: ignore
 import cose.keys.keytype # type: ignore
 import requests
 
+from lxml.html import fromstring as parse_html # type: ignore
 from jose import jwt # type: ignore
 from base45 import b45decode # type: ignore
 from cose.headers import KID # type: ignore
@@ -30,7 +31,7 @@ from cose.keys.keytype import KtyEC2, KtyRSA
 from cose.messages import CoseMessage # type: ignore
 from cose.algorithms import Ps256, Es256
 from cryptography import x509
-from cryptography.x509 import load_der_x509_certificate
+from cryptography.x509 import load_der_x509_certificate, load_pem_x509_certificate
 from cryptography.x509.oid import NameOID, ObjectIdentifier, SignatureAlgorithmOID
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
@@ -51,6 +52,8 @@ EPOCH = datetime(1970, 1, 1)
 
 CertList = Dict[bytes, x509.Certificate]
 
+JS_CERT_PATTERN = re.compile(r"'({[^-']*-----BEGIN[^']*)'")
+ESC = re.compile(r'\\x([0-9a-fA-F][0-9a-fA-F])')
 CURVE_NAME_IGNORE = re.compile(r'[-_ ]')
 
 CURVES: Dict[str, type] = {
@@ -153,7 +156,7 @@ def load_ehc_certs_signed_json(data: bytes, pubkey: Optional[EllipticCurvePublic
         try:
             pubkey.verify(sign_dds, body_json, ECDSA(hashes.SHA256()))
         except InvalidSignature:
-            raise ValueError(f'Invalid signature DE trust list: {sign.hex()}')
+            raise ValueError(f'Invalid signature of DE trust list: {sign.hex()}')
 
     for cert in body['certificates']:
         key_id    = b64decode(cert['kid'])
@@ -182,8 +185,29 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             # TODO: find out how to verify signature?
             response = requests.get(CERTS_URL_AT)
             response.raise_for_status()
-            certs_cbor = b64decode(json.loads(response.content)['trustList']['trustListContent'])
+            certs_json = json.loads(response.content)['trustList']
+            certs_cbor = b64decode(certs_json['trustListContent'])
+            certs_sig  = b64decode(certs_json['trustListSignature'])
             certs_at = load_ehc_certs_cbor(certs_cbor)
+
+            response = requests.get('https://greencheck.gv.at/')
+            response.raise_for_status()
+            doc = parse_html(response.content.decode(response.encoding))
+
+            for script in doc.xpath('//script'):
+                src = script.attrib.get('src')
+                if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
+                    response = requests.get(f'https://greencheck.gv.at{src}')
+                    response.raise_for_status()
+                    source = response.content.decode(response.encoding)
+                    match = JS_CERT_PATTERN.search(source)
+                    if match:
+                        certs_pems_js = match.group(1)
+                        certs_pems_js = ESC.sub(lambda match: chr(int(match[1], 16)), certs_pems_js)
+                        meta_certs = {k: load_pem_x509_certificate(v.encode()) for k, v in json.loads(certs_pems_js).items()}
+                        # TODO
+                    break
+
             certs.update(certs_at)
 
         elif source == 'DE':
