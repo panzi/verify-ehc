@@ -60,6 +60,22 @@ optional arguments:
   --image            Input is an image containing a QR-code.
 ```
 
+You can also use this tool to download the trust list as provided of one (or
+more) of the supported countries and save it as JSON or CBOR:
+
+```bash
+./verify_ehc.py --certs-from AT --save-certs austrian_trust_list.json
+```
+
+```bash
+./verify_ehc.py --certs-from AT --save-certs austrian_trust_list.cbor
+```
+
+The CBOR version is in the same format as the Austrian trust list. The JSON
+version is in a format that is useful when used with the WebCrypto browser API.
+I.e. it supplies the public keys as JSON Web Keys (JWK) and the algorithm
+parameter object as needed by the WebCrypto API.
+
 MIT License
 -----------
 
