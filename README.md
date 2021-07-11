@@ -26,7 +26,7 @@ For vaccinations:
     the 1st vaccination, though the date of the 1st vaccination is not included
     in the EHC of the 2nd vaccination!)
 * For vaccines with only 1 vaccination (e.g. Johnson & Johnson):
-  - valid starting from 22 days and ending at to 270 days after the vaccination
+  - valid starting from 22 days and ending at 270 days after the vaccination
 * For people recovered from COVID-19 that only need 1 vaccination:
   - valid starting from the day of vaccination and ending at 270 days after
 
