@@ -99,6 +99,9 @@ PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/
 # Sweden (JOSE encoded):
 CERTS_URL_SW = 'https://dgcg.covidbevis.se/tp/trust-list'
 
+# United Kingdom trust list:
+CERTS_URL_UK = 'https://covid-pass-verifier.com/assets/certificates.json'
+
 # See also this thread:
 # https://github.com/eu-digital-green-certificates/dgc-participating-countries/issues/10
 
@@ -211,7 +214,7 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             # TODO: find out how to verify signature?
             response = requests.get(CERTS_URL_SW)
             response.raise_for_status()
-            token_str = response.content.decode('UTF-8')
+            token_str = response.content.decode(response.encoding)
             token = jwt.get_unverified_claims(token_str)
 
             for country, country_keys in token['dsc_trust_list'].items():
@@ -225,6 +228,21 @@ def download_ehc_certs(sources: List[str]) -> CertList:
                             raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
                         certs[key_id] = cert
+
+        elif source == 'UK':
+            response = requests.get(CERTS_URL_UK)
+            response.raise_for_status()
+            certs_json = json.loads(response.content)
+            for entry in certs_json:
+                key_id   = bytes(entry['kid'])
+                cert_der = bytes(entry['crt'])
+                cert = load_der_x509_certificate(cert_der)
+
+                fingerprint = cert.fingerprint(hashes.SHA256())
+                if key_id != fingerprint[0:8]:
+                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+                certs[key_id] = cert
 
         else:
             raise ValueError(f'Unknown trust list source: {source}')
