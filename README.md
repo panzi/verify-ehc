@@ -51,7 +51,7 @@ optional arguments:
                      downloaded from the internet.
   --certs-from LIST  Download trust list from given country's trust list
                      service. Entries from later country overwrites earlier.
-                     Supported countries: DE, AT, SW (comma separated list,
+                     Supported countries: AT, DE, SW, UK (comma separated list,
                      default: DE,AT)
   --no-verify        Skip certificate verification.
   --list-certs       List certificates from trust list.

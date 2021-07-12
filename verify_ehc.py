@@ -367,7 +367,7 @@ def main() -> None:
 
     certs_ap = ap.add_mutually_exclusive_group()
     certs_ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
-    certs_ap.add_argument('--certs-from', metavar="LIST", help="Download trust list from given country's trust list service. Entries from later country overwrites earlier. Supported countries: DE, AT, SW (comma separated list, default: DE,AT)", default='DE,AT')
+    certs_ap.add_argument('--certs-from', metavar="LIST", help="Download trust list from given country's trust list service. Entries from later country overwrites earlier. Supported countries: AT, DE, SW, UK (comma separated list, default: DE,AT)", default='DE,AT')
 
     ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
 
