@@ -27,7 +27,7 @@ from cose.keys.curves import CoseCurve, P256, P384, P521
 from cose.keys.keyops import VerifyOp # type: ignore
 from cose.keys.keyparam import KpAlg, EC2KpX, EC2KpY, EC2KpCurve, KpKty, RSAKpN, RSAKpE, KpKeyOps # type: ignore
 from cose.keys.keytype import KtyEC2, KtyRSA
-from cose.messages import CoseMessage # type: ignore
+from cose.messages import CoseMessage, Sign1Message # type: ignore
 from cose.algorithms import Ps256, Es256
 from cryptography import x509
 from cryptography.x509 import load_der_x509_certificate
@@ -255,8 +255,10 @@ def decode_ehc(b45_data: str) -> CoseMessage:
     return msg
 
 def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList) -> bool:
-    cose_algo = msg.phdr.get(Algorithm)
+    cose_algo = msg.phdr.get(Algorithm) or msg.uhdr.get(Algorithm)
     print(f'COSE Sig. Algo.: {cose_algo.fullname if cose_algo is not None else "N/A"}')
+    if isinstance(msg, Sign1Message):
+        print(f'Signature      : {b64encode(msg.signature).decode("ASCII")}')
 
     given_kid = msg.phdr.get(KID) or msg.uhdr[KID]
     print(f'Key ID         : {given_kid.hex()} / {b64encode(given_kid).decode("ASCII")}')
@@ -267,7 +269,7 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList) -> bool:
 
     pk = cert.public_key()
     print(f'Key Type       : {type(pk).__name__.strip("_")}')
-    print(f'Cert Serial    : {cert.serial_number}')
+    print(f'Cert Serial Nr.: {":".join("%02x" % byte for byte in cert.serial_number.to_bytes(20, byteorder="big"))}')
     print(f'Cert Issuer    : {cert.issuer.rfc4514_string()}')
     print(f'Cert Subject   : {cert.subject.rfc4514_string()}')
     print(f'Cert Version   : {cert.version.name}')
@@ -286,6 +288,7 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList) -> bool:
 
     signature_algorithm_oid = cert.signature_algorithm_oid
     print(f'Signature Algo.: oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
+    print( 'Cert Signature :', b64encode(cert.signature).decode('ASCII'))
 
     if isinstance(pk, EllipticCurvePublicKey):
         print(f'Curve          : {pk.curve.name}')
@@ -426,7 +429,7 @@ def main() -> None:
             for key_id, cert in items:
                 signature_algorithm_oid = cert.signature_algorithm_oid
                 print('Key ID          :', key_id.hex(), '/', b64encode(key_id).decode("ASCII"))
-                print('Serial          :', cert.serial_number)
+                print('Serial Nr.      :', ":".join("%02x" % byte for byte in cert.serial_number.to_bytes(20, byteorder="big")))
                 print('Issuer          :', cert.issuer.rfc4514_string())
                 print('Subject         :', cert.subject.rfc4514_string())
                 print('Valid Date Range:',
@@ -440,7 +443,7 @@ def main() -> None:
                     print( 'Curve           :', pk.curve.name)
 
                 print(f'Signature Algo. : oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
-                #print( 'Signature       : ', cert.signature.hex())
+                print( 'Signature       :', b64encode(cert.signature).decode('ASCII'))
                 print()
 
     ehc_codes: List[str] = []
