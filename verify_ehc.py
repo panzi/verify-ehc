@@ -105,14 +105,6 @@ CERTS_URL_UK = 'https://covid-pass-verifier.com/assets/certificates.json'
 # See also this thread:
 # https://github.com/eu-digital-green-certificates/dgc-participating-countries/issues/10
 
-DEBUG_KEY_IDS: FrozenSet[bytes] = frozenset(
-    codecs.decode(key_id, 'hex')
-    for key_id in {
-        # EHCs generated with https://dgc.a-sit.at/ehn/ are signed with this key:
-        b'd919375fc1e7b6b2',
-    }
-)
-
 def json_serial(obj: Any) -> str:
     """JSON serializer for objects not serializable by default json code"""
 
