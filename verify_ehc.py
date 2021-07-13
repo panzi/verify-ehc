@@ -380,7 +380,10 @@ def get_cached_crl(uri: str) -> x509.CertificateRevocationList:
     if status_code is not None:
         raise ValueError(f'{status_code} {http.client.responses.get(status_code, "")}')
 
-    response = requests.get(uri)
+    headers = {
+        'User-Agent': ''
+    }
+    response = requests.get(uri, headers=headers)
     status_code = response.status_code
     crl_status[uri] = status_code
 
