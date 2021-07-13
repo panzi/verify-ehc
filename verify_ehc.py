@@ -18,6 +18,7 @@ import cose.algorithms # type: ignore
 import cose.keys.curves # type: ignore
 import cose.keys.keytype # type: ignore
 import requests
+import http.client
 
 from jose import jwt # type: ignore
 from base45 import b45decode # type: ignore
@@ -30,8 +31,9 @@ from cose.keys.keytype import KtyEC2, KtyRSA
 from cose.messages import CoseMessage, Sign1Message # type: ignore
 from cose.algorithms import Ps256, Es256
 from cryptography import x509
-from cryptography.x509 import load_der_x509_certificate
-from cryptography.x509.oid import NameOID, ObjectIdentifier, SignatureAlgorithmOID
+from cryptography.x509 import load_der_x509_certificate, load_der_x509_crl, load_pem_x509_crl
+from cryptography.x509.extensions import ExtensionNotFound
+from cryptography.x509.oid import NameOID, ObjectIdentifier, SignatureAlgorithmOID, ExtensionOID
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import Encoding, load_pem_public_key
@@ -295,6 +297,12 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
         cert_expired = True
 
     print(f'Cert Expired   : {cert_expired}')
+    revoked_cert = get_revoked_cert(cert)
+    if revoked_cert:
+        print( 'Cert Revoked At:', revoked_cert.revocation_date.isoformat())
+        revoked = True
+    else:
+        revoked = False
 
     signature_algorithm_oid = cert.signature_algorithm_oid
     print(f'Signature Algo.: oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
@@ -357,7 +365,59 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
         for ext in cert.extensions:
             print(f'- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
 
-    return valid and not cert_expired
+    return valid and not cert_expired and not revoked
+
+crl_status: Dict[str, int] = {}
+crls: Dict[str, x509.CertificateRevocationList] = {}
+
+def get_cached_crl(uri: str) -> x509.CertificateRevocationList:
+    crl = crls.get(uri)
+
+    if crl is not None:
+        return crl
+
+    status_code = crl_status.get(uri)
+    if status_code is not None:
+        raise ValueError(f'{status_code} {http.client.responses.get(status_code, "")}')
+
+    response = requests.get(uri)
+    status_code = response.status_code
+    crl_status[uri] = status_code
+
+    if response.status_code >= 400 and response.status_code < 600:
+        msg = f'{status_code} {http.client.responses.get(status_code, "")}'
+        print(f'ERROR: loading revokation list {uri} {msg}', file=sys.stderr)
+        raise ValueError(msg)
+
+    crl_bytes = response.content
+    if crl_bytes.startswith(b'-----BEGIN'):
+        crl = load_pem_x509_crl(crl_bytes)
+    else:
+        crl = load_der_x509_crl(crl_bytes)
+
+    crls[uri] = crl
+    return crl
+
+def get_revoked_cert(cert: x509.Certificate) -> Optional[x509.RevokedCertificate]:
+    try:
+        crl_points_ext = cert.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS)
+    except ExtensionNotFound:
+        pass
+    else:
+        crl_points = crl_points_ext.value
+        for crl_point in crl_points:
+            uris = crl_point.full_name
+            if uris:
+                for uri in uris:
+                    lower_uri = uri.value.lower()
+                    if lower_uri.startswith('http:') or lower_uri.startswith('https:'):
+                        try:
+                            crl = get_cached_crl(uri.value)
+                        except Exception as error:
+                            print(f'ERROR: loading revokation list {uri.value} {error}', file=sys.stderr)
+                        else:
+                            return crl.get_revoked_certificate_by_serial_number(cert.serial_number)
+    return None
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -370,6 +430,7 @@ def main() -> None:
 
     ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
     ap.add_argument('--print-exts', action='store_true', help='Also print certificate extensions.')
+    ap.add_argument('--strip-revoked', action='store_true', help='Strip revoked certificates. (Downloads certificate revocation list, if supported by certificate.)')
     ap.add_argument('--save-certs', metavar='FILE', help='Store downloaded certificates to FILE. The filetype is derived from the extension, which can be .json or .cbor')
 
     ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a QR-code.')
@@ -438,10 +499,20 @@ def main() -> None:
             else:
                 raise ValueError(f'Unsupported certificates file extension: {ext!r}')
 
-        if args.list_certs:
+        items: List[Tuple[bytes, x509.Certificate]]
+        revoked_certs: Dict[bytes, x509.RevokedCertificate] = {}
+        if args.list_certs or args.strip_revoked:
             items = list(certs.items())
             items.sort(key=lambda item: (item[1].issuer.rfc4514_string(), item[1].subject.rfc4514_string(), item[0]))
 
+        if args.strip_revoked:
+            for key_id, cert in items:
+                revoked_cert = get_revoked_cert(cert)
+                if revoked_cert:
+                    revoked_certs[key_id] = revoked_cert
+                    revoked = True
+
+        if args.list_certs:
             for key_id, cert in items:
                 signature_algorithm_oid = cert.signature_algorithm_oid
                 print('Key ID          :', key_id.hex(), '/', b64encode(key_id).decode("ASCII"))
@@ -461,12 +532,21 @@ def main() -> None:
                 print(f'Signature Algo. : oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
                 print( 'Signature       :', b64encode(cert.signature).decode('ASCII'))
 
+                if args.strip_revoked:
+                    revoked_cert = revoked_certs.get(key_id)
+                    if revoked_cert:
+                        print('Revoked At      :', revoked_cert.revocation_date.isoformat())
+
                 if args.print_exts and cert.extensions:
                     print('Extensions      :')
                     for ext in cert.extensions:
                         print(f'- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
 
                 print()
+
+        if args.strip_revoked:
+            for key_id in revoked_certs:
+                del certs[key_id]
 
     ehc_codes: List[str] = []
     if args.image:
