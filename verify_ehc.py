@@ -264,7 +264,7 @@ def decode_ehc(b45_data: str) -> CoseMessage:
     msg: CoseMessage = CoseMessage.decode(data)
     return msg
 
-def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList) -> bool:
+def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_exts: bool = False) -> bool:
     cose_algo = msg.phdr.get(Algorithm) or msg.uhdr.get(Algorithm)
     print(f'COSE Sig. Algo.: {cose_algo.fullname if cose_algo is not None else "N/A"}')
     if isinstance(msg, Sign1Message):
@@ -352,6 +352,11 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList) -> bool:
 
     print(f'Signature Valid: {valid}')
 
+    if print_exts and cert.extensions:
+        print('Extensions     :')
+        for ext in cert.extensions:
+            print(f'- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
+
     return valid and not cert_expired
 
 def main() -> None:
@@ -364,6 +369,7 @@ def main() -> None:
     ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
 
     ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
+    ap.add_argument('--print-exts', action='store_true', help='Also print certificate extensions.')
     ap.add_argument('--save-certs', metavar='FILE', help='Store downloaded certificates to FILE. The filetype is derived from the extension, which can be .json or .cbor')
 
     ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a QR-code.')
@@ -454,6 +460,12 @@ def main() -> None:
 
                 print(f'Signature Algo. : oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
                 print( 'Signature       :', b64encode(cert.signature).decode('ASCII'))
+
+                if args.print_exts and cert.extensions:
+                    print('Extensions      :')
+                    for ext in cert.extensions:
+                        print(f'- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
+
                 print()
 
     ehc_codes: List[str] = []
@@ -495,7 +507,7 @@ def main() -> None:
             print(f'Is Expired     :', datetime.now() >= expires_at)
 
         if certs is not None:
-            verify_ehc(ehc_msg, issued_at, certs)
+            verify_ehc(ehc_msg, issued_at, certs, args.print_exts)
 
         ehc = ehc_payload[-260][1]
         
