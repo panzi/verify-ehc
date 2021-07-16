@@ -82,6 +82,10 @@ version is in a format that is useful when used with the WebCrypto browser API.
 I.e. it supplies the public keys as JSON Web Keys (JWK) and the algorithm
 parameter object as needed by the WebCrypto API.
 
+**NOTE:** Some trust list endpoints (UK, FR) return only public keys instead of
+full x509 certificates for some entries. Currently this is not supported and
+an error is printed for each failed trust list entry.
+
 MIT License
 -----------
 
