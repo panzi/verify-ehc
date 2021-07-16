@@ -6,6 +6,7 @@ import json
 import sys
 import zlib
 import re
+import os
 import argparse
 import codecs
 
@@ -98,11 +99,17 @@ PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/
 # Keys from a French validation app (nothing official, just a hobby project by someone):
 # https://github.com/lovasoa/sanipasse/blob/master/src/assets/Digital_Green_Certificate_Signing_Keys.json
 
+# French trust list:
+# This requires the environment variable TACV_TOKEN to be set to a bearer token that can be found in the TousAntiCovid Verif app.
+CERTS_URL_FR = 'https://portail.tacv.myservices-ingroupe.com/api/client/configuration/synchronisation/tacv'
+
 # Sweden (JOSE encoded):
 CERTS_URL_SW = 'https://dgcg.covidbevis.se/tp/trust-list'
 
 # United Kingdom trust list:
 CERTS_URL_UK = 'https://covid-pass-verifier.com/assets/certificates.json'
+
+USER_AGENT = 'Mozilla/5.0 (Windows) Firefox/90.0'
 
 # See also this thread:
 # https://github.com/eu-digital-green-certificates/dgc-participating-countries/issues/10
@@ -134,7 +141,12 @@ def load_ehc_certs_cbor(cbor_data: bytes) -> CertList:
 
     return certs
 
-def load_ehc_certs_signed_json(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = None) -> CertList:
+def print_err(msg: str) -> None:
+    # so that errors and normal output is correctly interleaved:
+    sys.stdout.flush()
+    print(msg, file=sys.stderr)
+
+def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = None) -> CertList:
     certs: CertList = {}
 
     sign_b64, body_json = data.split(b'\n', 1)
@@ -153,21 +165,26 @@ def load_ehc_certs_signed_json(data: bytes, pubkey: Optional[EllipticCurvePublic
             raise ValueError(f'Invalid signature DE trust list: {sign.hex()}')
 
     for cert in body['certificates']:
-        key_id    = b64decode(cert['kid'])
-        country   = cert['country']
-        cert_type = cert['certificateType']
+        key_id_b64 = cert['kid']
+        key_id     = b64decode(key_id_b64)
+        country    = cert['country']
+        cert_type  = cert['certificateType']
         if cert_type != 'DSC':
-            print(f'[signed JSON cert list] unknown certificateType {cert_type!r} (country={country}, kid={key_id.hex()}', file=sys.stderr)
+            print_err(f'[signed JSON cert list] unknown certificateType {cert_type!r} (country={country}, kid={key_id.hex()}')
             continue
 
         raw_data = b64decode(cert['rawData'])
 
-        cert = load_der_x509_certificate(raw_data)
-        fingerprint = cert.fingerprint(hashes.SHA256())
-        if key_id != fingerprint[0:8]:
-            raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+        try:
+            cert = load_der_x509_certificate(raw_data)
+        except Exception as error:
+            print_err(f'ERROR: decoding DE trust list entry {key_id.hex()} / {key_id_b64}: {error}')
+        else:
+            fingerprint = cert.fingerprint(hashes.SHA256())
+            if key_id != fingerprint[0:8]:
+                raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
-        certs[key_id] = cert
+            certs[key_id] = cert
 
     return certs
 
@@ -177,36 +194,36 @@ def download_ehc_certs(sources: List[str]) -> CertList:
     for source in sources:
         if source == 'AT':
             # TODO: find out how to verify signature?
-            response = requests.get(CERTS_URL_AT)
+            response = requests.get(CERTS_URL_AT, headers={'User-Agent': USER_AGENT})
             response.raise_for_status()
             certs_cbor = b64decode(json.loads(response.content)['trustList']['trustListContent'])
             certs_at = load_ehc_certs_cbor(certs_cbor)
             certs.update(certs_at)
 
         elif source == 'DE':
-            response = requests.get(CERTS_URL_DE)
+            response = requests.get(CERTS_URL_DE, headers={'User-Agent': USER_AGENT})
             response.raise_for_status()
             certs_signed_json = response.content
 
             pubkey: Optional[EllipticCurvePublicKey] = None
-            response = requests.get(PUBKEY_URL_DE)
+            response = requests.get(PUBKEY_URL_DE, headers={'User-Agent': USER_AGENT})
             if response.status_code == 404:
-                print(f'{PUBKEY_URL_DE} pubkey for German trust list not found (404)!', file=sys.stderr)
+                print_err(f'{PUBKEY_URL_DE} pubkey for German trust list not found (404)!')
             else:
                 response.raise_for_status()
                 res_pubkey = load_pem_public_key(response.content)
 
                 if not isinstance(res_pubkey, EllipticCurvePublicKey):
-                    print(f'{PUBKEY_URL_DE} is expected to be an EllipticCurvePublicKey but actually is {type(res_pubkey).__name__}', file=sys.stderr)
+                    print_err(f'{PUBKEY_URL_DE} is expected to be an EllipticCurvePublicKey but actually is {type(res_pubkey).__name__}')
                 else:
                     pubkey = res_pubkey
 
-            certs_de = load_ehc_certs_signed_json(certs_signed_json, pubkey)
+            certs_de = load_de_trust_list(certs_signed_json, pubkey)
             certs.update(certs_de)
 
         elif source == 'SW':
             # TODO: find out how to verify signature?
-            response = requests.get(CERTS_URL_SW)
+            response = requests.get(CERTS_URL_SW, headers={'User-Agent': USER_AGENT})
             response.raise_for_status()
             token_str = response.content.decode(response.encoding)
             token = jwt.get_unverified_claims(token_str)
@@ -215,28 +232,65 @@ def download_ehc_certs(sources: List[str]) -> CertList:
                 for entry in country_keys['keys']:
                     key_id = b64decode(entry['kid'])
                     for key_data in entry['x5c']:
-                        cert = load_der_x509_certificate(b64decode_ignore_padding(key_data))
+                        try:
+                            cert = load_der_x509_certificate(b64decode_ignore_padding(key_data))
+                        except Exception as error:
+                            print_err(f'ERROR: decoding SW trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
+                        else:
+                            fingerprint = cert.fingerprint(hashes.SHA256())
+                            if key_id != fingerprint[0:8]:
+                                raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
-                        fingerprint = cert.fingerprint(hashes.SHA256())
-                        if key_id != fingerprint[0:8]:
-                            raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
-
-                        certs[key_id] = cert
+                            certs[key_id] = cert
 
         elif source == 'UK':
-            response = requests.get(CERTS_URL_UK)
+            response = requests.get(CERTS_URL_UK, headers={'User-Agent': USER_AGENT})
             response.raise_for_status()
             certs_json = json.loads(response.content)
             for entry in certs_json:
                 key_id   = bytes(entry['kid'])
                 cert_der = bytes(entry['crt'])
-                cert = load_der_x509_certificate(cert_der)
+                try:
+                    cert = load_der_x509_certificate(cert_der)
+                except Exception as error:
+                    print_err(f'ERROR: decoding UK trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
+                else:
+                    fingerprint = cert.fingerprint(hashes.SHA256())
+                    if key_id != fingerprint[0:8]:
+                        raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
-                fingerprint = cert.fingerprint(hashes.SHA256())
-                if key_id != fingerprint[0:8]:
-                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+                    certs[key_id] = cert
 
-                certs[key_id] = cert
+        elif source == 'FR':
+            TACV_TOKEN = os.getenv('TACV_TOKEN')
+            if TACV_TOKEN is None:
+                raise KeyError(
+                    'Required environment variable TACV_TOKEN for FR trust list is not set. '
+                    'You can get the value of the token from the TousAntiCovid Verif application.')
+
+            response = requests.get(CERTS_URL_FR, headers={
+                'User-Agent': USER_AGENT,
+                'Authorization': f'Bearer {TACV_TOKEN}',
+            })
+            response.raise_for_status()
+            certs_json = json.loads(response.content)
+            for key_id_b64, cert_b64 in certs_json['certificatesDCC'].items():
+                key_id = b64decode(key_id_b64)
+                cert_pem = b64decode(cert_b64)
+
+                # Yes, they encode it twice!
+                cert_der = b64decode(cert_pem)
+
+                try:
+                    cert = load_der_x509_certificate(cert_der)
+                except Exception as error:
+                    print_err(f'ERROR: decoding FR trust list entry {key_id.hex()} / {key_id_b64}: {error}')
+                else:
+                    fingerprint = cert.fingerprint(hashes.SHA256())
+                    if key_id != fingerprint[0:8]:
+                        raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+                    certs[key_id] = cert
 
         else:
             raise ValueError(f'Unknown trust list source: {source}')
@@ -380,16 +434,13 @@ def get_cached_crl(uri: str) -> x509.CertificateRevocationList:
     if status_code is not None:
         raise ValueError(f'{status_code} {http.client.responses.get(status_code, "")}')
 
-    headers = {
-        'User-Agent': ''
-    }
-    response = requests.get(uri, headers=headers)
+    response = requests.get(uri, headers={'User-Agent': USER_AGENT})
     status_code = response.status_code
     crl_status[uri] = status_code
 
     if response.status_code >= 400 and response.status_code < 600:
         msg = f'{status_code} {http.client.responses.get(status_code, "")}'
-        print(f'ERROR: loading revokation list {uri} {msg}', file=sys.stderr)
+        print_err(f'ERROR: loading revokation list {uri} {msg}')
         raise ValueError(msg)
 
     crl_bytes = response.content
@@ -417,7 +468,7 @@ def get_revoked_cert(cert: x509.Certificate) -> Optional[x509.RevokedCertificate
                         try:
                             crl = get_cached_crl(uri.value)
                         except Exception as error:
-                            print(f'ERROR: loading revokation list {uri.value} {error}', file=sys.stderr)
+                            print_err(f'ERROR: loading revokation list {uri.value} {error}')
                         else:
                             return crl.get_revoked_certificate_by_serial_number(cert.serial_number)
     return None
@@ -427,7 +478,12 @@ def main() -> None:
 
     certs_ap = ap.add_mutually_exclusive_group()
     certs_ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
-    certs_ap.add_argument('--certs-from', metavar="LIST", help="Download trust list from given country's trust list service. Entries from later country overwrites earlier. Supported countries: AT, DE, SW, UK (comma separated list, default: DE,AT)", default='DE,AT')
+    certs_ap.add_argument('--certs-from', metavar="LIST", help=
+        "Download trust list from given country's trust list service. Entries from later country overwrites earlier. "
+        "Supported countries: AT, DE, FR, SW, UK (comma separated list). "
+        "FR needs the environment varialbe TACV_TOKEN set to a bearer token that can be found in the TousAntiCovid Verif app. "
+        "(default: DE,AT)",
+        default='DE,AT')
 
     ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
 
@@ -436,8 +492,8 @@ def main() -> None:
     ap.add_argument('--strip-revoked', action='store_true', help='Strip revoked certificates. (Downloads certificate revocation list, if supported by certificate.)')
     ap.add_argument('--save-certs', metavar='FILE', help='Store downloaded certificates to FILE. The filetype is derived from the extension, which can be .json or .cbor')
 
-    ap.add_argument('--image', action='store_true', default=False, help='Input is an image containing a QR-code.')
-    ap.add_argument('ehc_code', nargs='*')
+    ap.add_argument('--image', action='store_true', default=False, help='ehc_code is a path to an image file containing a QR-code.')
+    ap.add_argument('ehc_code', nargs='*', help='Scanned EHC QR-code, or when --image is passed path to an image file.')
 
     args = ap.parse_args()
 
@@ -489,8 +545,13 @@ def main() -> None:
 
                     certs_json[key_id.hex()] = cert_json
 
+                json_doc = {
+                    'timestamp': datetime.utcnow().isoformat()+'Z',
+                    'trustList': certs_json,
+                }
+
                 with open(args.save_certs, 'w') as text_stream:
-                    json.dump({'trustList': certs_json}, text_stream)
+                    json.dump(json_doc, text_stream)
 
             elif lower_ext == '.cbor':
                 # same CBOR format as AT trust list
@@ -560,7 +621,7 @@ def main() -> None:
                 for qrcode in qrcodes:
                     ehc_codes.append(qrcode.data.decode("utf-8"))
             else:
-                print(f'{filename}: no qr-code found', file=sys.stderr)
+                print_err(f'{filename}: no qr-code found')
     else:
         ehc_codes.extend(args.ehc_code)
 

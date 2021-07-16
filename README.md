@@ -39,11 +39,12 @@ Usage
 ```plain
 usage: verify_ehc.py [-h] [--certs-file FILE | --certs-from LIST]
                      [--no-verify] [--list-certs] [--print-exts]
-                     [--save-certs FILE] [--image]
+                     [--strip-revoked] [--save-certs FILE] [--image]
                      [ehc_code ...]
 
 positional arguments:
-  ehc_code
+  ehc_code           Scanned EHC QR-code, or when --image is passed path to an
+                     image file.
 
 optional arguments:
   -h, --help         show this help message and exit
@@ -51,14 +52,18 @@ optional arguments:
                      downloaded from the internet.
   --certs-from LIST  Download trust list from given country's trust list
                      service. Entries from later country overwrites earlier.
-                     Supported countries: AT, DE, SW, UK (comma separated
-                     list, default: DE,AT)
+                     Supported countries: AT, DE, FR, SW, UK (comma separated
+                     list). FR needs the environment varialbe TACV_TOKEN set
+                     to a bearer token that can be found in the TousAntiCovid
+                     Verif app. (default: DE,AT)
   --no-verify        Skip certificate verification.
   --list-certs       List certificates from trust list.
   --print-exts       Also print certificate extensions.
+  --strip-revoked    Strip revoked certificates. (Downloads certificate
+                     revocation list, if supported by certificate.)
   --save-certs FILE  Store downloaded certificates to FILE. The filetype is
                      derived from the extension, which can be .json or .cbor
-  --image            Input is an image containing a QR-code.
+  --image            ehc_code is a path to an image file containing a QR-code.
 ```
 
 You can also use this tool to download the trust list as provided of one (or
