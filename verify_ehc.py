@@ -143,6 +143,13 @@ CERTS_URL_SW = 'https://dgcg.covidbevis.se/tp/trust-list'
 # United Kingdom trust list:
 CERTS_URL_UK = 'https://covid-pass-verifier.com/assets/certificates.json'
 
+# Switzerland:
+# See: https://github.com/cn-uofbasel/ch-dcc-keys
+ROOT_CERT_CH  = 'https://www.bit.admin.ch/dam/bit/en/dokumente/pki/scanning_center/swiss_governmentrootcaii.crt.download.crt/swiss_governmentrootcaii.crt'
+CERT_URL_CH   = 'https://www.cc.bit.admin.ch/trust/v1/keys/list'
+UPDATE_URL_CH = 'https://www.cc.bit.admin.ch/trust/v1/keys/updates?certFormat=ANDROID'
+# Don't know what the updates are.
+
 USER_AGENT = 'Mozilla/5.0 (Windows) Firefox/90.0'
 
 # See also this thread:
