@@ -321,7 +321,7 @@ def load_hack_certs_json(data: bytes) -> CertList:
             y = int.from_bytes(y_bytes, byteorder="big", signed=False)
 
             ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
-            cert = HackCertificate(ec_pubkey, SignatureAlgorithmOID.ECDSA_WITH_SHA256, issuer, subject)
+            cert = HackCertificate(ec_pubkey, SignatureAlgorithmOID.ECDSA_WITH_SHA256, issuer, subject, not_valid_before, not_valid_after)
             certs[key_id] = cert
 
         elif key_type == 'RSA':
@@ -331,7 +331,7 @@ def load_hack_certs_json(data: bytes) -> CertList:
             n = int.from_bytes(n_bytes, byteorder="big", signed=False)
 
             rsa_pubkey = RSAPublicNumbers(e, n).public_key()
-            cert = HackCertificate(rsa_pubkey, SignatureAlgorithmOID.RSASSA_PSS, issuer, subject)
+            cert = HackCertificate(rsa_pubkey, SignatureAlgorithmOID.RSASSA_PSS, issuer, subject, not_valid_before, not_valid_after)
             certs[key_id] = cert
 
         else:
