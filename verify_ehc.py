@@ -87,6 +87,14 @@ NIST_CURVES: Dict[str, Type[EllipticCurve]] = {
 
 NAME_OIDS = {name: name_oid for name_oid, name in _NAMEOID_TO_NAME.items()}
 
+NAME_OIDS_UK = dict(
+    postalCode             = NameOID.POSTAL_CODE,
+    street                 = NameOID.STREET_ADDRESS,
+    organizationIdentifier = NameOID.ORGANIZATION_NAME,
+    serialNumber           = NameOID.SERIAL_NUMBER,
+)
+NAME_OIDS_UK.update(NAME_OIDS)
+
 for name in dir(cose.keys.curves):
     if not name.startswith('_'):
         curve = getattr(cose.keys.curves, name)
@@ -447,13 +455,13 @@ def download_ehc_certs(sources: List[str]) -> CertList:
                 else:
                     iss = entry.get('iss')
                     if iss:
-                        issuer = Name([NameAttribute(NAME_OIDS.get(key) or ObjectIdentifier(key), value) for key, value in iss.items()])
+                        issuer = Name([NameAttribute(NAME_OIDS_UK.get(key) or ObjectIdentifier(key), value) for key, value in iss.items()])
                     else:
                         issuer = Name([])
 
                     sub = entry.get('sub')
                     if sub:
-                        subject = Name([NameAttribute(NAME_OIDS.get(key) or ObjectIdentifier(key), value) for key, value in sub.items()])
+                        subject = Name([NameAttribute(NAME_OIDS_UK.get(key) or ObjectIdentifier(key), value) for key, value in sub.items()])
                     else:
                         subject = Name([])
 
