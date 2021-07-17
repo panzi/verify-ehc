@@ -82,9 +82,14 @@ version is in a format that is useful when used with the WebCrypto browser API.
 I.e. it supplies the public keys as JSON Web Keys (JWK) and the algorithm
 parameter object as needed by the WebCrypto API.
 
-**NOTE:** Some trust list endpoints (UK, FR) return only public keys instead of
-full x509 certificates for some entries. Currently this is not supported and
-an error is printed for each failed trust list entry.
+**NOTE:** Some trust list endpoints (UK, FR, NL) return only public keys instead
+of full x509 certificates for some or all entries. These are supported for EHC
+verification (untested because of lack of example), but because they're no real
+x509 certificates a valid time range of `1970-01-01T00:00:00+00:00` to
+`9999-12-31T23:59:59.999999+00:00` is used. When using `--save-certs` with a
+CBOR file these public keys are skipped and an error message is printed for
+each. You can use them when saving the trust list to JSON, though, because that
+itself doesn't contain a full x509 certificate.
 
 MIT License
 -----------

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Tuple, Any, Dict, Optional, List, FrozenSet, Union
+from typing import Tuple, Any, Dict, Optional, List, FrozenSet, Union, Type
 
 import json
 import sys
@@ -21,6 +21,7 @@ import cose.keys.keytype # type: ignore
 import requests
 import http.client
 
+from dateutil.parser import isoparse as parse_datetime
 from jose import jwt # type: ignore
 from base45 import b45decode # type: ignore
 from cose.headers import KID, Algorithm # type: ignore
@@ -32,14 +33,15 @@ from cose.keys.keytype import KtyEC2, KtyRSA
 from cose.messages import CoseMessage, Sign1Message # type: ignore
 from cose.algorithms import Ps256, Es256
 from cryptography import x509
-from cryptography.x509 import load_der_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, NameAttribute, Version, Extensions
+from cryptography.x509 import load_der_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, RelativeDistinguishedName, NameAttribute, Version, Extensions
 from cryptography.x509.extensions import ExtensionNotFound
 from cryptography.x509.name import _NAMEOID_TO_NAME
 from cryptography.x509.oid import NameOID, ObjectIdentifier, SignatureAlgorithmOID, ExtensionOID
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key, load_der_public_key
-from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey, EllipticCurvePublicNumbers, ECDSA, SECP256R1
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey, EllipticCurvePublicNumbers, ECDSA, SECP256R1, EllipticCurve
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 #from cryptography.hazmat.primitives.asymmetric.dsa import DSAPublicKey
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
@@ -57,12 +59,30 @@ CertList = Dict[bytes, x509.Certificate]
 
 CURVE_NAME_IGNORE = re.compile(r'[-_ ]')
 
-CURVES: Dict[str, type] = {
-    # https://tools.ietf.org/search/rfc4492#appendix-A
+# https://tools.ietf.org/search/rfc4492#appendix-A
+COSE_CURVES: Dict[str, Type[CoseCurve]] = {
     'secp256r1':  P256,
     'prime256v1': P256,
     'secp384r1':  P384,
     'secp521r1':  P521,
+}
+
+NIST_CURVES: Dict[str, Type[EllipticCurve]] = {
+    'K-163': ec.SECT163K1,
+    'B-163': ec.SECT163R2,
+    'K-233': ec.SECT233K1,
+    'B-233': ec.SECT233R1,
+    'K-283': ec.SECT283K1,
+    'B-283': ec.SECT283R1,
+    'K-409': ec.SECT409K1,
+    'B-409': ec.SECT409R1,
+    'K-571': ec.SECT571K1,
+    'B-571': ec.SECT571R1,
+    'P-192': ec.SECP192R1,
+    'P-224': ec.SECP224R1,
+    'P-256': ec.SECP256R1,
+    'P-384': ec.SECP384R1,
+    'P-521': ec.SECP521R1,
 }
 
 NAME_OIDS = {name: name_oid for name_oid, name in _NAMEOID_TO_NAME.items()}
@@ -72,7 +92,7 @@ for name in dir(cose.keys.curves):
         curve = getattr(cose.keys.curves, name)
         if curve is not CoseCurve and isinstance(curve, type) and issubclass(curve, CoseCurve) and curve.fullname != 'RESERVED': # type: ignore
             name = CURVE_NAME_IGNORE.sub('', curve.fullname).lower() # type: ignore
-            CURVES[name] = curve
+            COSE_CURVES[name] = curve
 del name, curve
 
 PREFIX = 'HC1:'
@@ -97,7 +117,10 @@ CERTS_URL_DE  = 'https://de.dscg.ubirch.com/trustList/DSC/'
 PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/Certificates/PROD_RKI/CA/pubkey.pem'
 
 # Netherlands public keys:
-# https://www.npkd.nl/csca-health.html
+# (https://www.npkd.nl/csca-health.html)
+# https://verifier-api.<acc/test/etc>.coronacheck.nl/v4/verifier/public_keys
+CERTS_URL_NL = 'https://verifier-api.acc.coronacheck.nl/v4/verifier/public_keys'
+# JSON containing base64 containing JSON containing base64 containing XML!
 
 # Keys from a French validation app (nothing official, just a hobby project by someone):
 # https://github.com/lovasoa/sanipasse/blob/master/src/assets/Digital_Green_Certificate_Signing_Keys.json
@@ -124,18 +147,24 @@ class HackCertificate(x509.Certificate):
     _issuer: Name
     _subject: Name
     _extensions: Extensions
+    _not_valid_before: datetime
+    _not_valid_after: datetime
 
     def __init__(self,
         public_key: Union[EllipticCurvePublicKey, RSAPublicKey],
         signature_algorithm_oid: ObjectIdentifier,
-        issuer: Name,
+        issuer:  Name,
         subject: Name,
+        not_valid_before: datetime = datetime(1970, 1, 1, tzinfo=timezone.utc),
+        not_valid_after:  datetime = datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc),
     ):
         self._public_key = public_key
         self._signature_algorithm_oid = signature_algorithm_oid
-        self._issuer = issuer
+        self._issuer  = issuer
         self._subject = subject
         self._extensions = Extensions([])
+        self._not_valid_before = not_valid_before
+        self._not_valid_after  = not_valid_after
 
     def fingerprint(self, algorithm: hashes.HashAlgorithm) -> bytes:
         raise NotImplementedError
@@ -194,11 +223,11 @@ class HackCertificate(x509.Certificate):
 
     @property
     def not_valid_before(self) -> datetime:
-        return datetime(1970, 1, 1, tzinfo=timezone.utc)
+        return self._not_valid_before
 
     @property
     def not_valid_after(self) -> datetime:
-        return datetime(9999, 12, 31, 23, 59, 59, 999, tzinfo=timezone.utc)
+        return self._not_valid_after
 
     def public_key(self):
         return self._public_key
@@ -231,6 +260,67 @@ def load_ehc_certs_cbor(cbor_data: bytes) -> CertList:
             raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
         certs[key_id] = cert
+
+    return certs
+
+def make_json_relative_distinguished_name(name: Name) -> Dict[str, str]:
+    return {_NAMEOID_TO_NAME.get(attr.oid, attr.oid.dotted_string): attr.value
+            for attr in reversed(list(name))}
+
+def parse_json_relative_distinguished_name(name_dict: Dict[str, str]) -> Name:
+    name_attrs: List[NameAttribute] = []
+
+    for attr_type_str, attr_value in name_dict.items():
+        attr_type = NAME_OIDS.get(attr_type_str) or ObjectIdentifier(attr_type_str)
+
+        name_attrs.append(NameAttribute(attr_type, attr_value))
+
+    return Name(name_attrs)
+
+def load_hack_certs_json(data: bytes) -> CertList:
+    certs_dict = json.loads(data)
+    certs: CertList = {}
+
+    for key_id_hex, cert_dict in certs_dict['trustList'].items():
+        not_valid_before = parse_datetime(cert_dict['notValidBefore'])
+        not_valid_after  = parse_datetime(cert_dict['notValidAfter'])
+
+        issuer  = parse_json_relative_distinguished_name(cert_dict['issuer'])  if 'issuer'  in cert_dict else Name([])
+        subject = parse_json_relative_distinguished_name(cert_dict['subject']) if 'subject' in cert_dict else Name([])
+
+        pubkey_dict = cert_dict['publicKey']
+
+        key_id = urlsafe_b64decode_ignore_padding(pubkey_dict['kid'])
+        key_type = pubkey_dict['kty']
+
+        if key_type == 'EC':
+            curve_name = pubkey_dict['crv']
+            curve_type = NIST_CURVES.get(curve_name)
+            if not curve_type:
+                raise ValueError(f'unknown elliptic curve: {curve_name!r}')
+            curve = curve_type()
+
+            x_bytes = urlsafe_b64decode_ignore_padding(pubkey_dict['x'])
+            y_bytes = urlsafe_b64decode_ignore_padding(pubkey_dict['y'])
+            x = int.from_bytes(x_bytes, byteorder="big", signed=False)
+            y = int.from_bytes(y_bytes, byteorder="big", signed=False)
+
+            ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
+            cert = HackCertificate(ec_pubkey, SignatureAlgorithmOID.ECDSA_WITH_SHA256, issuer, subject)
+            certs[key_id] = cert
+
+        elif key_type == 'RSA':
+            e_bytes = urlsafe_b64decode_ignore_padding(pubkey_dict['e'])
+            n_bytes = urlsafe_b64decode_ignore_padding(pubkey_dict['n'])
+            e = int.from_bytes(e_bytes, byteorder="big", signed=False)
+            n = int.from_bytes(n_bytes, byteorder="big", signed=False)
+
+            rsa_pubkey = RSAPublicNumbers(e, n).public_key()
+            cert = HackCertificate(rsa_pubkey, SignatureAlgorithmOID.RSASSA_PSS, issuer, subject)
+            certs[key_id] = cert
+
+        else:
+            raise TypeError(f'illegal key type: {key_type!r}')
 
     return certs
 
@@ -357,13 +447,13 @@ def download_ehc_certs(sources: List[str]) -> CertList:
                 else:
                     iss = entry.get('iss')
                     if iss:
-                        issuer = Name([NameAttribute(NAME_OIDS[key], value) for key, value in iss.items()])
+                        issuer = Name([NameAttribute(NAME_OIDS.get(key) or ObjectIdentifier(key), value) for key, value in iss.items()])
                     else:
                         issuer = Name([])
 
                     sub = entry.get('sub')
                     if sub:
-                        subject = Name([NameAttribute(NAME_OIDS[key], value) for key, value in sub.items()])
+                        subject = Name([NameAttribute(NAME_OIDS.get(key) or ObjectIdentifier(key), value) for key, value in sub.items()])
                     else:
                         subject = Name([])
 
@@ -430,6 +520,32 @@ def download_ehc_certs(sources: List[str]) -> CertList:
 
                 except Exception as error:
                     print_err(f'ERROR: decoding FR trust list entry {key_id.hex()} / {key_id_b64}: {error}')
+
+        elif source == 'NL':
+            response = requests.get(CERTS_URL_NL, headers={'User-Agent': USER_AGENT})
+            response.raise_for_status()
+            certs_json = json.loads(response.content)
+
+            # TODO: find out how to verify signature?
+            payload   = b64decode(certs_json['payload'])
+            signature = b64decode(certs_json['signature'])
+
+            payload_dict = json.loads(payload)
+            # TODO: Don't know what to do with payload_dict['nl_keys'][*]['public_key']
+            #       Its some strange XML (encoded as base64)
+            for key_id_b64, pubkeys in payload_dict['eu_keys'].items():
+                key_id = b64decode(key_id_b64)
+
+                for entry in pubkeys:
+                    # XXX: Why is pubkeys an array? How can there be more than one key to a key ID?
+                    pubkey_der = b64decode(entry['subjectPk'])
+                    # entry['keyUsage'] is array of 't' or 'v' or 'r'
+                    try:
+                        cert = load_hack_certificate_from_der_public_key(pubkey_der)
+                    except Exception as error:
+                        print_err(f'ERROR: decoding NL trust list entry {key_id.hex()} / {key_id_b64}: {error}')
+                    else:
+                        certs[key_id] = cert
 
         else:
             raise ValueError(f'Unknown trust list source: {source}')
@@ -521,7 +637,7 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
         y = rsa_pn.y.to_bytes(size, byteorder="big")
 
         curve_name = CURVE_NAME_IGNORE.sub('', pk.curve.name).lower()
-        curve = CURVES.get(curve_name)
+        curve = COSE_CURVES.get(curve_name)
 
         if not curve:
             raise KeyError(f'Unsupported curve: {pk.curve.name}')
@@ -630,7 +746,7 @@ def main() -> None:
     certs_ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
     certs_ap.add_argument('--certs-from', metavar="LIST", help=
         "Download trust list from given country's trust list service. Entries from later country overwrites earlier. "
-        "Supported countries: AT, DE, FR, SW, UK (comma separated list). "
+        "Supported countries: AT, DE, FR, NL, SW, UK (comma separated list). "
         "FR needs the environment varialbe TACV_TOKEN set to a bearer token that can be found in the TousAntiCovid Verif app. "
         "(default: DE,AT)",
         default='DE,AT')
@@ -650,7 +766,12 @@ def main() -> None:
     certs: Optional[CertList] = None
     if not args.no_verify or args.save_certs or args.list_certs:
         if args.certs_file:
-            certs = load_ehc_certs(args.certs_file)
+            if args.certs_file.lower().endswith('.json'):
+                with open(args.certs_file, 'rb') as fp:
+                    certs_data = fp.read()
+                certs = load_hack_certs_json(certs_data)
+            else:
+                certs = load_ehc_certs(args.certs_file)
         else:
             certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')])
 
@@ -685,8 +806,8 @@ def main() -> None:
                         }
 
                     cert_json = {
-                        'issuer':  cert.issuer.rfc4514_string(),
-                        'subject': cert.subject.rfc4514_string(),
+                        'issuer':  make_json_relative_distinguished_name(cert.issuer),
+                        'subject': make_json_relative_distinguished_name(cert.subject),
                         'notValidBefore': cert.not_valid_before.isoformat(),
                         'notValidAfter':  cert.not_valid_after.isoformat(),
                         'publicKey': pubkey_json,
