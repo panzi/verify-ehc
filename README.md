@@ -26,7 +26,7 @@ For vaccinations:
     the 1st vaccination, though the date of the 1st vaccination is not included
     in the EHC of the 2nd vaccination!)
 * For vaccines with only 1 vaccination (e.g. Johnson & Johnson):
-  - valid starting from 22 days and ending at to 270 days after the vaccination
+  - valid starting from 22 days and ending at 270 days after the vaccination
 * For people recovered from COVID-19 that only need 1 vaccination:
   - valid starting from the day of vaccination and ending at 270 days after
 
@@ -38,12 +38,13 @@ Usage
 
 ```plain
 usage: verify_ehc.py [-h] [--certs-file FILE | --certs-from LIST]
-                     [--no-verify] [--list-certs] [--save-certs FILE]
-                     [--image]
+                     [--no-verify] [--list-certs] [--print-exts]
+                     [--strip-revoked] [--save-certs FILE] [--image]
                      [ehc_code ...]
 
 positional arguments:
-  ehc_code
+  ehc_code           Scanned EHC QR-code, or when --image is passed path to an
+                     image file.
 
 optional arguments:
   -h, --help         show this help message and exit
@@ -51,14 +52,44 @@ optional arguments:
                      downloaded from the internet.
   --certs-from LIST  Download trust list from given country's trust list
                      service. Entries from later country overwrites earlier.
-                     Supported countries: DE, AT, SW (comma separated list,
-                     default: DE,AT)
+                     Supported countries: AT, DE, FR, SW, UK (comma separated
+                     list). FR needs the environment varialbe TACV_TOKEN set
+                     to a bearer token that can be found in the TousAntiCovid
+                     Verif app. (default: DE,AT)
   --no-verify        Skip certificate verification.
   --list-certs       List certificates from trust list.
+  --print-exts       Also print certificate extensions.
+  --strip-revoked    Strip revoked certificates. (Downloads certificate
+                     revocation list, if supported by certificate.)
   --save-certs FILE  Store downloaded certificates to FILE. The filetype is
                      derived from the extension, which can be .json or .cbor
-  --image            Input is an image containing a QR-code.
+  --image            ehc_code is a path to an image file containing a QR-code.
 ```
+
+You can also use this tool to download the trust list as provided of one (or
+more) of the supported countries and save it as JSON or CBOR:
+
+```bash
+./verify_ehc.py --certs-from AT --save-certs austrian_trust_list.json
+```
+
+```bash
+./verify_ehc.py --certs-from AT --save-certs austrian_trust_list.cbor
+```
+
+The CBOR version is in the same format as the Austrian trust list. The JSON
+version is in a format that is useful when used with the WebCrypto browser API.
+I.e. it supplies the public keys as JSON Web Keys (JWK) and the algorithm
+parameter object as needed by the WebCrypto API.
+
+**NOTE:** Some trust list endpoints (UK, FR, NL) return only public keys instead
+of full x509 certificates for some or all entries. These are supported for EHC
+verification (untested because of lack of example), but because they're no real
+x509 certificates a valid time range of `1970-01-01T00:00:00+00:00` to
+`9999-12-31T23:59:59.999999+00:00` is used. When using `--save-certs` with a
+CBOR file these public keys are skipped and an error message is printed for
+each. You can use them when saving the trust list to JSON, though, because that
+itself doesn't contain a full x509 certificate.
 
 MIT License
 -----------
