@@ -402,6 +402,10 @@ def download_at_certs() -> CertList:
 
     root_cert_key_id = sig_msg.phdr.get(KID) or sig_msg.uhdr[KID]
 
+    # TODO: Find out another place where to get the AT root certificate from.
+    #       This gets it from the same server as the trust list itself, which is suboptimal.
+    # TODO: Maybe look if there is a revocation list URL in root_cert.extensions?
+
     response = requests.get('https://greencheck.gv.at/', headers={'User-Agent': USER_AGENT})
     status_code = response.status_code
     if status_code < 200 or status_code >= 300:
@@ -434,6 +438,13 @@ def download_at_certs() -> CertList:
                     break
 
     if root_cert:
+        now = datetime.utcnow()
+        if now < root_cert.not_valid_before:
+            raise ValueError(f'AT trust list root certificate not yet valid: {now.isoformat()} < {root_cert.not_valid_before.isoformat()}')
+
+        if now > root_cert.not_valid_after:
+            raise ValueError(f'AT trust list root certificate already expired: {now.isoformat()} > {root_cert.not_valid_after.isoformat()}')
+
         sig_msg.key = cert_to_cose_key(root_cert)
 
         if not sig_msg.verify_signature():
@@ -448,7 +459,6 @@ def download_at_certs() -> CertList:
         created_at = EPOCH + timedelta(seconds=sig[5]) # I guess? Or "not valid before"?
         expires_at = EPOCH + timedelta(seconds=sig[4])
 
-        now = datetime.utcnow()
         if now > expires_at:
             raise ValueError(f'AT trust list already expired at {expires_at.isoformat()}')
     else:
