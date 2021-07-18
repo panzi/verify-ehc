@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Tuple, Any, Dict, Optional, List, FrozenSet, Union, Type
+from typing import Tuple, Any, Dict, Optional, List, FrozenSet, Union, Type, Callable
 
 import json
 import sys
@@ -389,264 +389,262 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
 
     return certs
 
-def download_ehc_certs(sources: List[str]) -> CertList:
-    certs = {}
+def download_at_certs() -> CertList:
+    response = requests.get(CERTS_URL_AT, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+    certs_json = json.loads(response.content)['trustList']
+    certs_cbor = b64decode(certs_json['trustListContent'])
+    certs_sig  = b64decode(certs_json['trustListSignature'])
 
-    for source in sources:
-        if source == 'AT':
-            response = requests.get(CERTS_URL_AT, headers={'User-Agent': USER_AGENT})
-            response.raise_for_status()
-            certs_json = json.loads(response.content)['trustList']
-            certs_cbor = b64decode(certs_json['trustListContent'])
-            certs_sig  = b64decode(certs_json['trustListSignature'])
-            certs_at   = load_ehc_certs_cbor(certs_cbor)
+    sig_msg = CoseMessage.decode(certs_sig)
+    if not isinstance(sig_msg, Sign1Message):
+        raise TypeError(f'AT trust list: expected signature to be a Sign1 COSE message')
 
-            sig_msg = CoseMessage.decode(certs_sig)
-            if not isinstance(sig_msg, Sign1Message):
-                raise TypeError(f'AT trust list: expected signature to be a Sign1 COSE message')
+    root_cert_key_id = sig_msg.phdr.get(KID) or sig_msg.uhdr[KID]
 
-            root_cert_key_id = sig_msg.phdr.get(KID) or sig_msg.uhdr[KID]
+    response = requests.get('https://greencheck.gv.at/', headers={'User-Agent': USER_AGENT})
+    status_code = response.status_code
+    if status_code < 200 or status_code >= 300:
+        print_err(f'https://greencheck.gv.at/ {status_code} {http.client.responses.get(status_code, "")}')
+    else:
+        doc = parse_html(response.content.decode(response.encoding))
 
-            response = requests.get('https://greencheck.gv.at/', headers={'User-Agent': USER_AGENT})
-            status_code = response.status_code
-            if status_code < 200 or status_code >= 300:
-                print_err(f'https://greencheck.gv.at/ {status_code} {http.client.responses.get(status_code, "")}')
-            else:
-                doc = parse_html(response.content.decode(response.encoding))
-
-                root_cert: Optional[x509.Certificate] = None
-                for script in doc.xpath('//script'):
-                    src = script.attrib.get('src')
-                    if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
-                        response = requests.get(f'https://greencheck.gv.at{src}', headers={'User-Agent': USER_AGENT})
-                        status_code = response.status_code
-                        if status_code < 200 or status_code >= 300:
-                            print_err(f'https://greencheck.gv.at{src} {status_code} {http.client.responses.get(status_code, "")}')
-                        else:
-                            source = response.content.decode(response.encoding)
-                            match = JS_CERT_PATTERN.search(source)
-                            if match:
-                                certs_pems_js = match.group(1)
-                                certs_pems_js = ESC.sub(lambda match: chr(int(match[1], 16)), certs_pems_js)
-
-                                for meta_cert_key, meta_cert_src in json.loads(certs_pems_js).items():
-                                    meta_cert = load_pem_x509_certificate(meta_cert_src.encode())
-
-                                    key_id = meta_cert.fingerprint(hashes.SHA256())[:8]
-                                    if key_id == root_cert_key_id:
-                                        root_cert = meta_cert
-                                        break
-                            break
-
-            if root_cert:
-                sig_msg.key = cert_to_cose_key(root_cert)
-
-                if not sig_msg.verify_signature():
-                    raise ValueError(f'Invalid signature of AT trust list: {sig_msg.signature.hex()}')
-
-                sig = cbor2.loads(sig_msg.payload)
-                digest = hashlib.sha256(certs_cbor).digest()
-
-                if sig[2] != digest:
-                    raise ValueError(f'Invalid hash of AT trust list. expected: {sig[2].hex()}, actual: {digest.hex()}')
-
-                created_at = EPOCH + timedelta(seconds=sig[5]) # I guess? Or "not valid before"?
-                expires_at = EPOCH + timedelta(seconds=sig[4])
-
-                now = datetime.utcnow()
-                if now > expires_at:
-                    raise ValueError(f'AT trust list already expired at {expires_at.isoformat()}')
-            else:
-                print_err(f'root certificate for AT trust list not found!')
-
-            certs.update(certs_at)
-
-        elif source == 'DE':
-            response = requests.get(CERTS_URL_DE, headers={'User-Agent': USER_AGENT})
-            response.raise_for_status()
-            certs_signed_json = response.content
-
-            pubkey: Optional[EllipticCurvePublicKey] = None
-            response = requests.get(PUBKEY_URL_DE, headers={'User-Agent': USER_AGENT})
-            if response.status_code == 404:
-                print_err(f'{PUBKEY_URL_DE} root certificate for DE trust list not found (404)!')
-            else:
-                response.raise_for_status()
-                res_pubkey = load_pem_public_key(response.content)
-
-                if not isinstance(res_pubkey, EllipticCurvePublicKey):
-                    pubkey_type = type(res_pubkey)
-                    print_err(f'{PUBKEY_URL_DE} is expected to be an EllipticCurvePublicKey but actually is {pubkey_type.__module__}.{pubkey_type.__name__}')
+        root_cert: Optional[x509.Certificate] = None
+        for script in doc.xpath('//script'):
+            src = script.attrib.get('src')
+            if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
+                response = requests.get(f'https://greencheck.gv.at{src}', headers={'User-Agent': USER_AGENT})
+                status_code = response.status_code
+                if status_code < 200 or status_code >= 300:
+                    print_err(f'https://greencheck.gv.at{src} {status_code} {http.client.responses.get(status_code, "")}')
                 else:
-                    pubkey = res_pubkey
+                    source = response.content.decode(response.encoding)
+                    match = JS_CERT_PATTERN.search(source)
+                    if match:
+                        certs_pems_js = match.group(1)
+                        certs_pems_js = ESC.sub(lambda match: chr(int(match[1], 16)), certs_pems_js)
 
-            certs_de = load_de_trust_list(certs_signed_json, pubkey)
-            certs.update(certs_de)
+                        for meta_cert_key, meta_cert_src in json.loads(certs_pems_js).items():
+                            meta_cert = load_pem_x509_certificate(meta_cert_src.encode())
 
-        elif source == 'SW':
-            # TODO: find out how to verify signature?
-            response = requests.get(CERTS_URL_SW, headers={'User-Agent': USER_AGENT})
-            response.raise_for_status()
-            token_str = response.content.decode(response.encoding)
-            token = jwt.get_unverified_claims(token_str)
+                            key_id = meta_cert.fingerprint(hashes.SHA256())[:8]
+                            if key_id == root_cert_key_id:
+                                root_cert = meta_cert
+                                break
+                    break
 
-            for country, country_keys in token['dsc_trust_list'].items():
-                for entry in country_keys['keys']:
-                    key_id = b64decode(entry['kid'])
-                    for key_data in entry['x5c']:
-                        try:
-                            cert = load_der_x509_certificate(b64decode_ignore_padding(key_data))
-                        except Exception as error:
-                            print_err(f'decoding SW trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
-                        else:
-                            fingerprint = cert.fingerprint(hashes.SHA256())
-                            if key_id != fingerprint[0:8]:
-                                raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+    if root_cert:
+        sig_msg.key = cert_to_cose_key(root_cert)
 
-                            certs[key_id] = cert
+        if not sig_msg.verify_signature():
+            raise ValueError(f'Invalid signature of AT trust list: {sig_msg.signature.hex()}')
 
-        elif source == 'UK' or source == 'GB':
-            response = requests.get(CERTS_URL_UK, headers={'User-Agent': USER_AGENT})
-            response.raise_for_status()
-            certs_json = json.loads(response.content)
-            for entry in certs_json:
-                key_id   = bytes(entry['kid'])
-                cert_der = bytes(entry['crt'])
-                if cert_der:
-                    try:
-                        cert = load_der_x509_certificate(cert_der)
-                    except Exception as error:
-                        print_err(f'decoding UK trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
-                    else:
-                        fingerprint = cert.fingerprint(hashes.SHA256())
-                        if key_id != fingerprint[0:8]:
-                            raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+        sig = cbor2.loads(sig_msg.payload)
+        digest = hashlib.sha256(certs_cbor).digest()
 
-                        certs[key_id] = cert
-                else:
-                    iss = entry.get('iss')
-                    if iss:
-                        issuer = Name([NameAttribute(NAME_OIDS_UK.get(key) or ObjectIdentifier(key), value) for key, value in iss.items()])
-                    else:
-                        issuer = Name([])
+        if sig[2] != digest:
+            raise ValueError(f'Invalid hash of AT trust list. expected: {sig[2].hex()}, actual: {digest.hex()}')
 
-                    sub = entry.get('sub')
-                    if sub:
-                        subject = Name([NameAttribute(NAME_OIDS_UK.get(key) or ObjectIdentifier(key), value) for key, value in sub.items()])
-                    else:
-                        subject = Name([])
+        created_at = EPOCH + timedelta(seconds=sig[5]) # I guess? Or "not valid before"?
+        expires_at = EPOCH + timedelta(seconds=sig[4])
 
-                    pub = entry['pub']
+        now = datetime.utcnow()
+        if now > expires_at:
+            raise ValueError(f'AT trust list already expired at {expires_at.isoformat()}')
+    else:
+        print_err(f'root certificate for AT trust list not found!')
 
-                    if 'x' in pub and 'y' in pub:
-                        # EC
-                        x_bytes = bytes(pub['x'])
-                        y_bytes = bytes(pub['y'])
-                        x = int.from_bytes(x_bytes, byteorder="big", signed=False)
-                        y = int.from_bytes(y_bytes, byteorder="big", signed=False)
-                        curve = SECP256R1()
-                        ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
-                        cert = HackCertificate(ec_pubkey, issuer, subject)
-                        certs[key_id] = cert
+    return load_ehc_certs_cbor(certs_cbor)
 
-                    elif 'n' in pub and 'e' in pub:
-                        # RSA
-                        e_bytes = bytes(pub['e'])
-                        n_bytes = bytes(pub['n'])
-                        e = int.from_bytes(e_bytes, byteorder="big", signed=False)
-                        n = int.from_bytes(n_bytes, byteorder="big", signed=False)
-                        rsa_pubkey = RSAPublicNumbers(e, n).public_key()
-                        cert = HackCertificate(rsa_pubkey, issuer, subject)
-                        certs[key_id] = cert
+def download_de_certs() -> CertList:
+    response = requests.get(CERTS_URL_DE, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+    certs_signed_json = response.content
 
-                    else:
-                        print_err(f'decoding UK trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: no supported public key data found')
+    pubkey: Optional[EllipticCurvePublicKey] = None
+    response = requests.get(PUBKEY_URL_DE, headers={'User-Agent': USER_AGENT})
+    if response.status_code == 404:
+        print_err(f'{PUBKEY_URL_DE} root certificate for DE trust list not found (404)!')
+    else:
+        response.raise_for_status()
+        res_pubkey = load_pem_public_key(response.content)
 
-        elif source == 'FR':
-            FR_TOKEN = os.getenv('FR_TOKEN')
-            if FR_TOKEN is None:
-                raise KeyError(
-                    'Required environment variable FR_TOKEN for FR trust list is not set. '
-                    'You can get the value of the token from the TousAntiCovid Verif application.')
-
-            response = requests.get(CERTS_URL_FR, headers={
-                'User-Agent': USER_AGENT,
-                'Authorization': f'Bearer {FR_TOKEN}',
-            })
-            response.raise_for_status()
-            certs_json = json.loads(response.content)
-            for key_id_b64, cert_b64 in certs_json['certificatesDCC'].items():
-                key_id = b64decode(key_id_b64)
-                cert_pem = b64decode(cert_b64)
-
-                # Yes, they encode it twice!
-                cert_der = b64decode(cert_pem)
-
-                try:
-                    try:
-                        cert = load_der_x509_certificate(cert_der)
-                    except ValueError:
-                        cert = load_hack_certificate_from_der_public_key(cert_der)
-                        # HackCertificate.fingerprint() is not implemented
-                        certs[key_id] = cert
-
-                    else:
-                        fingerprint = cert.fingerprint(hashes.SHA256())
-                        if key_id != fingerprint[0:8]:
-                            raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
-
-                        certs[key_id] = cert
-
-                except Exception as error:
-                    print_err(f'decoding FR trust list entry {key_id.hex()} / {key_id_b64}: {error}')
-
-        elif source == 'NL':
-            response = requests.get(CERTS_URL_NL, headers={'User-Agent': USER_AGENT})
-            response.raise_for_status()
-            certs_json = json.loads(response.content)
-
-            # TODO: find out how to verify signature?
-            payload   = b64decode(certs_json['payload'])
-            signature = b64decode(certs_json['signature'])
-
-            payload_dict = json.loads(payload)
-            # TODO: Don't know what to do with payload_dict['nl_keys'][*]['public_key']
-            #       Its some strange XML (encoded as base64)
-            for key_id_b64, pubkeys in payload_dict['eu_keys'].items():
-                key_id = b64decode(key_id_b64)
-
-                for entry in pubkeys:
-                    # XXX: Why is pubkeys an array? How can there be more than one key to a key ID?
-                    pubkey_der = b64decode(entry['subjectPk'])
-                    # entry['keyUsage'] is array of 't' or 'v' or 'r'
-                    try:
-                        cert = load_hack_certificate_from_der_public_key(pubkey_der)
-                    except Exception as error:
-                        print_err(f'decoding NL trust list entry {key_id.hex()} / {key_id_b64}: {error}')
-                    else:
-                        certs[key_id] = cert
-
-        elif source == 'CH':
-            certs.update(load_ch_certs())
-
+        if not isinstance(res_pubkey, EllipticCurvePublicKey):
+            pubkey_type = type(res_pubkey)
+            print_err(f'{PUBKEY_URL_DE} is expected to be an EllipticCurvePublicKey but actually is {pubkey_type.__module__}.{pubkey_type.__name__}')
         else:
-            raise ValueError(f'Unknown trust list source: {source}')
+            pubkey = res_pubkey
+
+    return load_de_trust_list(certs_signed_json, pubkey)
+
+def download_sw_certs() -> CertList:
+    certs: CertList = {}
+    # TODO: find out how to verify signature?
+    response = requests.get(CERTS_URL_SW, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+    token_str = response.content.decode(response.encoding)
+    token = jwt.get_unverified_claims(token_str)
+
+    for country, country_keys in token['dsc_trust_list'].items():
+        for entry in country_keys['keys']:
+            key_id = b64decode(entry['kid'])
+            for key_data in entry['x5c']:
+                try:
+                    cert = load_der_x509_certificate(b64decode_ignore_padding(key_data))
+                except Exception as error:
+                    print_err(f'decoding SW trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
+                else:
+                    fingerprint = cert.fingerprint(hashes.SHA256())
+                    if key_id != fingerprint[0:8]:
+                        raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+                    certs[key_id] = cert
+    return certs
+
+def download_uk_certs() -> CertList:
+    certs: CertList = {}
+    response = requests.get(CERTS_URL_UK, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+    certs_json = json.loads(response.content)
+    for entry in certs_json:
+        key_id   = bytes(entry['kid'])
+        cert_der = bytes(entry['crt'])
+        if cert_der:
+            try:
+                cert = load_der_x509_certificate(cert_der)
+            except Exception as error:
+                print_err(f'decoding UK trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
+            else:
+                fingerprint = cert.fingerprint(hashes.SHA256())
+                if key_id != fingerprint[0:8]:
+                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+                certs[key_id] = cert
+        else:
+            iss = entry.get('iss')
+            if iss:
+                issuer = Name([NameAttribute(NAME_OIDS_UK.get(key) or ObjectIdentifier(key), value) for key, value in iss.items()])
+            else:
+                issuer = Name([])
+
+            sub = entry.get('sub')
+            if sub:
+                subject = Name([NameAttribute(NAME_OIDS_UK.get(key) or ObjectIdentifier(key), value) for key, value in sub.items()])
+            else:
+                subject = Name([])
+
+            pub = entry['pub']
+
+            if 'x' in pub and 'y' in pub:
+                # EC
+                x_bytes = bytes(pub['x'])
+                y_bytes = bytes(pub['y'])
+                x = int.from_bytes(x_bytes, byteorder="big", signed=False)
+                y = int.from_bytes(y_bytes, byteorder="big", signed=False)
+                curve = SECP256R1()
+                ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
+                cert = HackCertificate(ec_pubkey, issuer, subject)
+                certs[key_id] = cert
+
+            elif 'n' in pub and 'e' in pub:
+                # RSA
+                e_bytes = bytes(pub['e'])
+                n_bytes = bytes(pub['n'])
+                e = int.from_bytes(e_bytes, byteorder="big", signed=False)
+                n = int.from_bytes(n_bytes, byteorder="big", signed=False)
+                rsa_pubkey = RSAPublicNumbers(e, n).public_key()
+                cert = HackCertificate(rsa_pubkey, issuer, subject)
+                certs[key_id] = cert
+
+            else:
+                print_err(f'decoding UK trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: no supported public key data found')
+    return certs
+
+def download_fr_certs(token: Optional[str] = None) -> CertList:
+    certs: CertList = {}
+    if token is None:
+        token = os.getenv('FR_TOKEN')
+        if token is None:
+            raise KeyError(
+                'Required environment variable FR_TOKEN for FR trust list is not set. '
+                'You can get the value of the token from the TousAntiCovid Verif application.')
+
+    response = requests.get(CERTS_URL_FR, headers={
+        'User-Agent': USER_AGENT,
+        'Authorization': f'Bearer {token}',
+    })
+    response.raise_for_status()
+    certs_json = json.loads(response.content)
+    for key_id_b64, cert_b64 in certs_json['certificatesDCC'].items():
+        key_id = b64decode(key_id_b64)
+        cert_pem = b64decode(cert_b64)
+
+        # Yes, they encode it twice!
+        cert_der = b64decode(cert_pem)
+
+        try:
+            try:
+                cert = load_der_x509_certificate(cert_der)
+            except ValueError:
+                cert = load_hack_certificate_from_der_public_key(cert_der)
+                # HackCertificate.fingerprint() is not implemented
+                certs[key_id] = cert
+
+            else:
+                fingerprint = cert.fingerprint(hashes.SHA256())
+                if key_id != fingerprint[0:8]:
+                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+                certs[key_id] = cert
+
+        except Exception as error:
+            print_err(f'decoding FR trust list entry {key_id.hex()} / {key_id_b64}: {error}')
 
     return certs
 
-def load_ch_certs() -> CertList:
+def download_nl_certs(token: Optional[str] = None) -> CertList:
+    certs: CertList = {}
+    response = requests.get(CERTS_URL_NL, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+    certs_json = json.loads(response.content)
+
+    # TODO: find out how to verify signature?
+    payload   = b64decode(certs_json['payload'])
+    signature = b64decode(certs_json['signature'])
+
+    payload_dict = json.loads(payload)
+    # TODO: Don't know what to do with payload_dict['nl_keys'][*]['public_key']
+    #       Its some strange XML (encoded as base64)
+    for key_id_b64, pubkeys in payload_dict['eu_keys'].items():
+        key_id = b64decode(key_id_b64)
+
+        for entry in pubkeys:
+            # XXX: Why is pubkeys an array? How can there be more than one key to a key ID?
+            pubkey_der = b64decode(entry['subjectPk'])
+            # entry['keyUsage'] is array of 't' or 'v' or 'r'
+            try:
+                cert = load_hack_certificate_from_der_public_key(pubkey_der)
+            except Exception as error:
+                print_err(f'decoding NL trust list entry {key_id.hex()} / {key_id_b64}: {error}')
+            else:
+                certs[key_id] = cert
+    return certs
+
+def download_ch_certs(token: Optional[str] = None) -> CertList:
     CH_USER_AGENT = 'ch.admin.bag.covidcertificate.wallet;2.1.1;1626211804080;Android;28'
-    CH_TOKEN = os.getenv('CH_TOKEN')
-    if CH_TOKEN is None:
-        raise KeyError(
-            "Required environment variable CH_TOKEN for FR trust list is not set. "
-            "You can get the value of the token from the BIT's Android CovidCertificate application.")
+
+    if token is None:
+        token = os.getenv('CH_TOKEN')
+        if token is None:
+            raise KeyError(
+                "Required environment variable CH_TOKEN for FR trust list is not set. "
+                "You can get the value of the token from the BIT's Android CovidCertificate application.")
 
     response = requests.get(ROOT_CERT_URL_CH, headers={
         'User-Agent': CH_USER_AGENT,
         'Accept': 'application/json+jws',
         'Accept-Encoding': 'gzip',
-        'Authorization': f'Bearer {CH_TOKEN}',
+        'Authorization': f'Bearer {token}',
     })
     response.raise_for_status()
     root_cert = load_pem_x509_certificate(response.content)
@@ -655,7 +653,7 @@ def load_ch_certs() -> CertList:
         'User-Agent': CH_USER_AGENT,
         'Accept': 'application/json+jws',
         'Accept-Encoding': 'gzip',
-        'Authorization': f'Bearer {CH_TOKEN}',
+        'Authorization': f'Bearer {token}',
     })
     response.raise_for_status()
     active_key_ids_b64 = load_jwt(response.content, root_cert)['activeKeyIds']
@@ -665,7 +663,7 @@ def load_ch_certs() -> CertList:
         'User-Agent': CH_USER_AGENT,
         'Accept': 'application/json+jws',
         'Accept-Encoding': 'gzip',
-        'Authorization': f'Bearer {CH_TOKEN}',
+        'Authorization': f'Bearer {token}',
     })
     response.raise_for_status()
     pubkeys: List[Dict[str, Optional[str]]] = load_jwt(response.content, root_cert)['certs']
@@ -700,6 +698,30 @@ def load_ch_certs() -> CertList:
 
             else:
                 print_err(f'decoding CH trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: algorithm not supported: {alg!r}')
+
+    return certs
+
+DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
+    'AT': download_at_certs,
+    'CH': download_ch_certs,
+    'DE': download_de_certs,
+    'FR': download_fr_certs,
+    'GB': download_uk_certs, # alias
+    'NL': download_nl_certs,
+    'SW': download_sw_certs,
+    'UK': download_uk_certs,
+}
+
+def download_ehc_certs(sources: List[str]) -> CertList:
+    certs: CertList = {}
+    get_downloader = DOWNLOADERS.get
+
+    for source in sources:
+        downloader = get_downloader(source)
+        if downloader is None:
+            raise ValueError(f'Unknown trust list source: {source}')
+
+        certs.update(downloader())
 
     return certs
 
