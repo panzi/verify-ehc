@@ -9,6 +9,7 @@ import re
 import os
 import argparse
 import codecs
+import hashlib
 
 from os.path import splitext
 from datetime import date, datetime, timedelta, timezone
@@ -393,7 +394,6 @@ def download_ehc_certs(sources: List[str]) -> CertList:
 
     for source in sources:
         if source == 'AT':
-            # TODO: find out how to verify signature?
             response = requests.get(CERTS_URL_AT, headers={'User-Agent': USER_AGENT})
             response.raise_for_status()
             certs_json = json.loads(response.content)['trustList']
@@ -401,45 +401,63 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             certs_sig  = b64decode(certs_json['trustListSignature'])
             certs_at   = load_ehc_certs_cbor(certs_cbor)
 
-            certs_sig_cbor = cbor2.loads(certs_sig)
-            certs_hdr = cbor2.loads(certs_sig_cbor.value[0])
-            root_cert_key_id = certs_hdr[4]
-            certs_sign = certs_sig_cbor.value[3]
+            sig_msg = CoseMessage.decode(certs_sig)
+            if not isinstance(sig_msg, Sign1Message):
+                raise TypeError(f'AT trust list: expected signature to be a Sign1 COSE message')
 
-            mid = len(certs_sign)//2
-            r = int.from_bytes(certs_sign[:mid], byteorder="big", signed=False)
-            s = int.from_bytes(certs_sign[mid:], byteorder="big", signed=False)
-            certs_sign_dds = encode_dss_signature(r, s)
+            root_cert_key_id = sig_msg.phdr.get(KID) or sig_msg.uhdr[KID]
 
             response = requests.get('https://greencheck.gv.at/', headers={'User-Agent': USER_AGENT})
-            response.raise_for_status()
-            doc = parse_html(response.content.decode(response.encoding))
+            status_code = response.status_code
+            if status_code < 200 or status_code >= 300:
+                print_err(f'https://greencheck.gv.at/ {status_code} {http.client.responses.get(status_code, "")}')
+            else:
+                doc = parse_html(response.content.decode(response.encoding))
 
-            root_cert: Optional[x509.Certificate] = None
-            for script in doc.xpath('//script'):
-                src = script.attrib.get('src')
-                if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
-                    response = requests.get(f'https://greencheck.gv.at{src}', headers={'User-Agent': USER_AGENT})
-                    response.raise_for_status()
-                    source = response.content.decode(response.encoding)
-                    match = JS_CERT_PATTERN.search(source)
-                    if match:
-                        certs_pems_js = match.group(1)
-                        certs_pems_js = ESC.sub(lambda match: chr(int(match[1], 16)), certs_pems_js)
+                root_cert: Optional[x509.Certificate] = None
+                for script in doc.xpath('//script'):
+                    src = script.attrib.get('src')
+                    if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
+                        response = requests.get(f'https://greencheck.gv.at{src}', headers={'User-Agent': USER_AGENT})
+                        status_code = response.status_code
+                        if status_code < 200 or status_code >= 300:
+                            print_err(f'https://greencheck.gv.at{src} {status_code} {http.client.responses.get(status_code, "")}')
+                        else:
+                            source = response.content.decode(response.encoding)
+                            match = JS_CERT_PATTERN.search(source)
+                            if match:
+                                certs_pems_js = match.group(1)
+                                certs_pems_js = ESC.sub(lambda match: chr(int(match[1], 16)), certs_pems_js)
 
-                        for meta_cert_key, meta_cert_src in json.loads(certs_pems_js).items():
-                            meta_cert = load_pem_x509_certificate(meta_cert_src.encode())
+                                for meta_cert_key, meta_cert_src in json.loads(certs_pems_js).items():
+                                    meta_cert = load_pem_x509_certificate(meta_cert_src.encode())
 
-                            key_id = meta_cert.fingerprint(hashes.SHA256())[:8]
-                            if key_id == root_cert_key_id:
-                                root_cert = meta_cert
-                                break
-                    break
+                                    key_id = meta_cert.fingerprint(hashes.SHA256())[:8]
+                                    if key_id == root_cert_key_id:
+                                        root_cert = meta_cert
+                                        break
+                            break
 
-            print("root cert:", root_cert)
             if root_cert:
-                pass
-                # TODO: COSE Sign1 message validation
+                sig_msg.key = cert_to_cose_key(root_cert)
+
+                if not sig_msg.verify_signature():
+                    raise ValueError(f'Invalid signature of AT trust list: {sig_msg.signature.hex()}')
+
+                sig = cbor2.loads(sig_msg.payload)
+                digest = hashlib.sha256(certs_cbor).digest()
+
+                if sig[2] != digest:
+                    raise ValueError(f'Invalid hash of AT trust list. expected: {sig[2].hex()}, actual: {digest.hex()}')
+
+                created_at = EPOCH + timedelta(seconds=sig[5]) # I guess? Or "not valid before"?
+                expires_at = EPOCH + timedelta(seconds=sig[4])
+
+                now = datetime.utcnow()
+                if now > expires_at:
+                    raise ValueError(f'AT trust list already expired at {expires_at.isoformat()}')
+            else:
+                print_err(f'root certificate for AT trust list not found!')
 
             certs.update(certs_at)
 
@@ -451,7 +469,7 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             pubkey: Optional[EllipticCurvePublicKey] = None
             response = requests.get(PUBKEY_URL_DE, headers={'User-Agent': USER_AGENT})
             if response.status_code == 404:
-                print_err(f'{PUBKEY_URL_DE} root cert for German trust list not found (404)!')
+                print_err(f'{PUBKEY_URL_DE} root certificate for DE trust list not found (404)!')
             else:
                 response.raise_for_status()
                 res_pubkey = load_pem_public_key(response.content)
@@ -824,6 +842,23 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
 
     if isinstance(pk, EllipticCurvePublicKey):
         print(f'Curve          : {pk.curve.name}')
+
+    msg.key = cert_to_cose_key(cert)
+
+    valid = msg.verify_signature()
+
+    print(f'Signature Valid: {valid}')
+
+    if print_exts and cert.extensions:
+        print('Extensions     :')
+        for ext in cert.extensions:
+            print(f'- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
+
+    return valid and not cert_expired and not revoked
+
+def cert_to_cose_key(cert: x509.Certificate) -> CoseKey:
+    pk = cert.public_key()
+    if isinstance(pk, EllipticCurvePublicKey):
         ec_pn = pk.public_numbers()
         size = pk.curve.key_size // 8
 
@@ -836,7 +871,7 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
         if not curve:
             raise KeyError(f'Unsupported curve: {pk.curve.name}')
 
-        msg.key = CoseKey.from_dict(
+        return CoseKey.from_dict(
             {
                 KpKeyOps: [VerifyOp],
                 KpKty: KtyEC2,
@@ -851,7 +886,7 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
         e = rsa_pn.e.to_bytes((rsa_pn.e.bit_length() + 7) // 8, byteorder='big')
         n = rsa_pn.n.to_bytes((rsa_pn.n.bit_length() + 7) // 8, byteorder='big')
 
-        msg.key = CoseKey.from_dict(
+        return CoseKey.from_dict(
             {
                 KpKeyOps: [VerifyOp],
                 KpKty: KtyRSA,
@@ -862,24 +897,13 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
         )
     #elif isinstance(pk, DSAPublicKey):
     #    dsa_pn = pk.public_numbers()
-    #    msg.key = CoseKey.from_dict(
+    #    return CoseKey.from_dict(
     #        {
     #            # ???
     #        }
     #    )
     else:
         raise KeyError(f'Unsupported public key type: {type(pk).__name__}')
-
-    valid = msg.verify_signature()
-
-    print(f'Signature Valid: {valid}')
-
-    if print_exts and cert.extensions:
-        print('Extensions     :')
-        for ext in cert.extensions:
-            print(f'- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
-
-    return valid and not cert_expired and not revoked
 
 crl_status: Dict[str, int] = {}
 crls: Dict[str, x509.CertificateRevocationList] = {}
@@ -892,15 +916,15 @@ def get_cached_crl(uri: str) -> x509.CertificateRevocationList:
 
     status_code = crl_status.get(uri)
     if status_code is not None:
-        raise ValueError(f'{status_code} {http.client.responses.get(status_code, "")}')
+        raise ValueError(f'{uri} {status_code} {http.client.responses.get(status_code, "")}')
 
     response = requests.get(uri, headers={'User-Agent': USER_AGENT})
     status_code = response.status_code
     crl_status[uri] = status_code
 
     if response.status_code >= 400 and response.status_code < 600:
-        msg = f'{status_code} {http.client.responses.get(status_code, "")}'
-        print_err(f'loading revokation list {uri} {msg}')
+        msg = f'{uri} {status_code} {http.client.responses.get(status_code, "")}'
+        print_err(f'loading revokation list {msg}')
         raise ValueError(msg)
 
     crl_bytes = response.content
@@ -1163,7 +1187,7 @@ def main() -> None:
         expires_at_int = ehc_payload.get(4)
         if expires_at_int is not None:
             expires_at = EPOCH + timedelta(seconds=expires_at_int)
-            print(f'Is Expired     :', datetime.now() >= expires_at)
+            print(f'Is Expired     :', datetime.utcnow() > expires_at)
 
         if certs is not None:
             verify_ehc(ehc_msg, issued_at, certs, args.print_exts)
