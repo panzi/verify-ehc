@@ -402,6 +402,8 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             certs_at   = load_ehc_certs_cbor(certs_cbor)
 
             certs_sig_cbor = cbor2.loads(certs_sig)
+            certs_hdr = cbor2.loads(certs_sig_cbor.value[0])
+            root_cert_key_id = certs_hdr[4]
             certs_sign = certs_sig_cbor.value[3]
 
             mid = len(certs_sign)//2
@@ -413,6 +415,7 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             response.raise_for_status()
             doc = parse_html(response.content.decode(response.encoding))
 
+            root_cert: Optional[x509.Certificate] = None
             for script in doc.xpath('//script'):
                 src = script.attrib.get('src')
                 if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
@@ -423,24 +426,20 @@ def download_ehc_certs(sources: List[str]) -> CertList:
                     if match:
                         certs_pems_js = match.group(1)
                         certs_pems_js = ESC.sub(lambda match: chr(int(match[1], 16)), certs_pems_js)
-                        # TODO: compare certs_sig_cbor.value[2] with a hash of certs_cbor?
 
                         for meta_cert_key, meta_cert_src in json.loads(certs_pems_js).items():
                             meta_cert = load_pem_x509_certificate(meta_cert_src.encode())
 
-                            pubkey_at = meta_cert.public_key()
-
-                            if isinstance(pubkey_at, EllipticCurvePublicKey):
-                                try:
-                                    # XXX: none work, also when using certs_sign
-                                    pubkey_at.verify(certs_sign_dds, certs_sig_cbor.value[2], ECDSA(hashes.SHA256()))
-                                except Exception as error:
-                                    print(meta_cert_key, 'ERROR', type(error).__name__)
-                                else:
-                                    print(meta_cert_key, 'SUCCESS')
-                            else:
-                                print(meta_cert_key, 'ERROR', 'not elliptic curve public key:', type(pubkey_at).__name__.strip('_'))
+                            key_id = meta_cert.fingerprint(hashes.SHA256())[:8]
+                            if key_id == root_cert_key_id:
+                                root_cert = meta_cert
+                                break
                     break
+
+            print("root cert:", root_cert)
+            if root_cert:
+                pass
+                # TODO: COSE Sign1 message validation
 
             certs.update(certs_at)
 
