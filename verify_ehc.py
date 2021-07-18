@@ -411,7 +411,7 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             s = int.from_bytes(certs_sign[mid:], byteorder="big", signed=False)
             certs_sign_dds = encode_dss_signature(r, s)
 
-            response = requests.get('https://greencheck.gv.at/')
+            response = requests.get('https://greencheck.gv.at/', headers={'User-Agent': USER_AGENT})
             response.raise_for_status()
             doc = parse_html(response.content.decode(response.encoding))
 
@@ -419,7 +419,7 @@ def download_ehc_certs(sources: List[str]) -> CertList:
             for script in doc.xpath('//script'):
                 src = script.attrib.get('src')
                 if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
-                    response = requests.get(f'https://greencheck.gv.at{src}')
+                    response = requests.get(f'https://greencheck.gv.at{src}', headers={'User-Agent': USER_AGENT})
                     response.raise_for_status()
                     source = response.content.decode(response.encoding)
                     match = JS_CERT_PATTERN.search(source)
