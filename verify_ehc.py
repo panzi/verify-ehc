@@ -783,7 +783,7 @@ DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'NO': download_no_certs,
     'SW': download_sw_certs,
     'UK': download_uk_certs,
-    'coivid-pass-verifier': download_covid_pass_verifier_certs,
+    'covid-pass-verifier': download_covid_pass_verifier_certs,
 }
 
 def download_ehc_certs(sources: List[str]) -> CertList:
@@ -1187,7 +1187,7 @@ def main() -> None:
         "\n"
         "CH needs the environment variable CH_TOKEN set to a bearer token that can be found in the BIT's Android CovidCertificate app APK. See also: https://github.com/cn-uofbasel/ch-dcc-keys\n"
         "\n"
-        "FR needs the environment varialbe FR_TOKEN set to a bearer token that can be found in the TousAntiCovid Verif app APK.\n"
+        "FR needs the environment variable FR_TOKEN set to a bearer token that can be found in the TousAntiCovid Verif app APK.\n"
         "\n"
         "NO needs the environment variable NO_TOKEN set to a AuthorizationHeader string that can be found in the Kontroll av koronasertifikat app APK. See also: https://harrisonsand.com/posts/covid-certificates/\n"
         "\n"
