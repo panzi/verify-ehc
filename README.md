@@ -53,7 +53,7 @@ optional arguments:
                      service. Comma separated list, entries from later country
                      overwrites earlier.
                      
-                     Supported countries: AT, CH, DE, FR, NL, SW, UK
+                     Supported countries: AT, CH, DE, FR, NL, NO, SW, UK
                      
                      FR needs the environment varialbe FR_TOKEN set to a
                      bearer token that can be found in the TousAntiCovid Verif
