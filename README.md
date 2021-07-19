@@ -64,14 +64,19 @@ optional arguments:
                      
                      Supported countries: AT, CH, DE, FR, NL, NO, SW, UK
                      
-                     FR needs the environment varialbe FR_TOKEN set to a
-                     bearer token that can be found in the TousAntiCovid Verif
-                     app.
-                     
                      CH needs the environment variable CH_TOKEN set to a
                      bearer token that can be found in the BIT's Android
-                     CovidCertificate app. See also:
+                     CovidCertificate app APK. See also:
                      https://github.com/cn-uofbasel/ch-dcc-keys
+                     
+                     FR needs the environment varialbe FR_TOKEN set to a
+                     bearer token that can be found in the TousAntiCovid Verif
+                     app APK.
+                     
+                     NO needs the environment variable NO_TOKEN set to a
+                     AuthorizationHeader string that can be found in the
+                     Kontroll av koronasertifikat app APK. See also:
+                     https://harrisonsand.com/posts/covid-certificates/
                      
                      Note that the UK trust list only contains UK public keys,
                      so you might want to combine it with another.
