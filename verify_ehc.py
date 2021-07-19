@@ -1189,6 +1189,8 @@ def main() -> None:
         "\n"
         "CH needs the environment variable CH_TOKEN set to a bearer token that can be found in the BIT's Android CovidCertificate app. See also: https://github.com/cn-uofbasel/ch-dcc-keys\n"
         "\n"
+        "Note that the UK trust list only contains UK public keys, so you might want to combine it with another.\n"
+        "\n"
         "If neither --certs-file nor --certs-from is given then --certs-from=DE,AT is used as default.\n",
         default='DE,AT')
 

@@ -73,6 +73,9 @@ optional arguments:
                      CovidCertificate app. See also:
                      https://github.com/cn-uofbasel/ch-dcc-keys
                      
+                     Note that the UK trust list only contains UK public keys,
+                     so you might want to combine it with another.
+                     
                      If neither --certs-file nor --certs-from is given then
                      --certs-from=DE,AT is used as default.
                      
