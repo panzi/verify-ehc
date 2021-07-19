@@ -9,4 +9,4 @@ requests
 pillow
 python-jose[cryptography]
 jwcrypto
-dateutil
+python-dateutil
