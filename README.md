@@ -33,6 +33,15 @@ For vaccinations:
 **NOTE:** These rules might be different in different countries and are subject
 to change. This information is supplied without liability.
 
+Norwegian COVID-19 Certificate
+------------------------------
+
+This script also tries to support Norwegian COVID-19 certificates, which seem
+to be the same as European Health Certificates except with an `NO1:` prefix
+instead of an `HC1:` prefix. Though this is untested for lack of real life
+examples. See also
+[this blog post](https://harrisonsand.com/posts/covid-certificates/).
+
 Usage
 -----
 
