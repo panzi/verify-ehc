@@ -1,0 +1,138 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "JSON Trust List Format",
+    "description": "The file format written by this tool when using --save-certs=*.json or read when using --certs-file=*.json",
+    "type": "object",
+    "required": [
+        "timestamp",
+        "trustList"
+    ],
+    "properties": {
+        "timestamp": {
+            "type": "string",
+            "format": "datetime"
+        },
+        "trustList": {
+            "type": "object",
+            "description": "Mapping of trust list entries. Keys are hex-encoded key IDs.",
+            "additionalProperties": {
+                "type": "object",
+                "requires": [
+                    "issuer",
+                    "subject",
+                    "notValidBefore",
+                    "notValidAfter",
+                    "publicKey",
+                    "algorithm"
+                ],
+                "properties": {
+                    "issuer": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "subject": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "notValidBefore": {
+                        "type": "string",
+                        "format": "datetime"
+                    },
+                    "notValidAfter": {
+                        "type": "string",
+                        "format": "datetime"
+                    },
+                    "algorithm": {
+                        "description": "The algorithm parameter to the WebCrypto crypto.subtle.verify() method.",
+                        "type": "object",
+                        "required": [
+                            "name",
+                            "hash"
+                        ],
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "enum": ["ECDSA", "RSASSA-PKCS1-v1_5"]
+                            },
+                            "namedCurve": {
+                                "description": "NIST elliptic curve name",
+                                "type": "string",
+                                "example": "P-256"
+                            },
+                            "hash": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "SHA-256"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "publicKey": {
+                        "description": "rfc7517 JSON Web Key. Only most common properties are described here for convenience.",
+                        "type": "object",
+                        "required": [
+                            "kty",
+                            "kid"
+                        ],
+                        "properties": {
+                            "kty": {
+                                "type": "string",
+                                "description": "Key type",
+                                "enum": ["EC", "RSA"]
+                            },
+                            "kid": {
+                                "type": "string",
+                                "format": "urlsafe-base64"
+                            },
+                            "crv": {
+                                "description": "NIST elliptic curve name",
+                                "type": "string",
+                                "example": "P-256"
+                            },
+                            "key_ops": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": [
+                                        "sign",
+                                        "verify",
+                                        "encrypt",
+                                        "decrypt",
+                                        "wrapKey",
+                                        "unwrapKey",
+                                        "deriveKey",
+                                        "deriveBits"
+                                    ],
+                                    "example": "verify"
+                                }
+                            },
+                            "x": {
+                                "type": "string",
+                                "format": "urlsafe-base64"
+                            },
+                            "y": {
+                                "type": "string",
+                                "format": "urlsafe-base64"
+                            },
+                            "n": {
+                                "type": "string",
+                                "format": "urlsafe-base64"
+                            },
+                            "e": {
+                                "type": "string",
+                                "format": "urlsafe-base64"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

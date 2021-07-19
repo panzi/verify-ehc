@@ -1,0 +1,66 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "CBOR Trust List Format",
+    "description": "The file format written by this tool when using --save-certs=*.cbor [--allow-public-key-only] or read when using --certs-file=*.cbor\nWhile it is a CBOR file I also use JSON Schema to describe the format.",
+    "type": "object",
+    "required": [
+        "c"
+    ],
+    "properties": {
+        "c": {
+            "type": "array",
+            "items": {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "required": [
+                            "i",
+                            "c"
+                        ],
+                        "properties": {
+                            "i": {
+                                "type": "string",
+                                "format": "binary",
+                                "description": "Key ID"
+                            },
+                            "c": {
+                                "type": "string",
+                                "format": "binary",
+                                "description": "DER encoded x509 certificate"
+                            }
+                        }
+                    },
+                    {
+                        "type": "object",
+                        "required": [
+                            "i",
+                            "k"
+                        ],
+                        "properties": {
+                            "i": {
+                                "type": "string",
+                                "format": "binary",
+                                "description": "Key ID"
+                            },
+                            "k": {
+                                "type": "string",
+                                "format": "binary",
+                                "description": "DER encoded public key"
+                            },
+                            "nb": {
+                                "type": "number",
+                                "format": "integer",
+                                "description": "Seconds after Unix epoch. The public key is not valid before this point in time."
+                            },
+                            "na": {
+                                "type": "number",
+                                "format": "integer",
+                                "description": "Seconds after Unix epoch. The public key is not valid after this point in time."
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}
