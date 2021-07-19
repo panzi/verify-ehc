@@ -52,10 +52,14 @@ optional arguments:
                      downloaded from the internet.
   --certs-from LIST  Download trust list from given country's trust list
                      service. Entries from later country overwrites earlier.
-                     Supported countries: AT, DE, FR, SW, UK (comma separated
-                     list). FR needs the environment varialbe TACV_TOKEN set
-                     to a bearer token that can be found in the TousAntiCovid
-                     Verif app. (default: DE,AT)
+                     Supported countries: AT, DE, FR, NL, SW, UK (comma
+                     separated list). FR needs the environment varialbe
+                     FR_TOKEN set to a bearer token that can be found in the
+                     TousAntiCovid Verif app. CH needs the environment
+                     variable CH_TOKEN set to a bearer token that can be found
+                     in the BIT's Android CovidCertificate app. See also:
+                     https://github.com/cn-uofbasel/ch-dcc-keys (default:
+                     DE,AT)
   --no-verify        Skip certificate verification.
   --list-certs       List certificates from trust list.
   --print-exts       Also print certificate extensions.
@@ -77,14 +81,22 @@ more) of the supported countries and save it as JSON or CBOR:
 ./verify_ehc.py --certs-from AT --save-certs austrian_trust_list.cbor
 ```
 
-The CBOR version is in the same format as the Austrian trust list. The JSON
-version is in a format that is useful when used with the WebCrypto browser API.
-I.e. it supplies the public keys as JSON Web Keys (JWK) and the algorithm
-parameter object as needed by the WebCrypto API.
+It is also possible to save both versions at once:
+
+```bash
+./verify_ehc.py --certs-from AT \
+    --save-certs austrian_trust_list.cbor \
+    --save-certs austrian_trust_list.json
+```
+
+The CBOR version is in the same format as the CBOR part of the Austrian trust
+list. The JSON version is in a format that is useful when used with the
+WebCrypto browser API. I.e. it supplies the public keys as JSON Web Keys (JWK)
+and the algorithm parameter object as needed by the WebCrypto API.
 
 **NOTE:** Some trust list endpoints (UK, FR, NL) return only public keys instead
 of full x509 certificates for some or all entries. These are supported for EHC
-verification (untested because of lack of example), but because they're no real
+verification (untested because of lack of examples), but because they're no real
 x509 certificates a valid time range of `1970-01-01T00:00:00+00:00` to
 `9999-12-31T23:59:59.999999+00:00` is used. When using `--save-certs` with a
 CBOR file these public keys are skipped and an error message is printed for

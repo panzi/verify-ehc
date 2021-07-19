@@ -1019,6 +1019,73 @@ def parse_env(data: str) -> Dict[str, str]:
             env[key] = value
     return env
 
+def save_certs(certs: CertList, certs_path: str) -> None:
+    ext = splitext(certs_path)[1]
+    lower_ext = ext.lower()
+    if lower_ext == '.json':
+        from jwcrypto.jwk import JWK # type: ignore
+
+        # JSON that includes all info in a format as needed by WebCrypto, I hope
+        certs_json = {}
+        for key_id, cert in certs.items():
+            pubkey = cert.public_key()
+            pubkey_jwk = JWK.from_pyca(pubkey)
+            pubkey_json = pubkey_jwk.export(as_dict=True, private_key=False)
+            pubkey_json['key_ops'] = ['verify']
+
+            # not sure about this:
+            pubkey_json['kid'] = urlsafe_b64encode(key_id).decode('ASCII')
+
+            # even less sure about this:
+            if pubkey_json['kty'] == 'EC':
+                algo = {
+                    'name': 'ECDSA',
+                    'namedCurve': pubkey_json['crv'],
+                    'hash': {'name': "SHA-256"},
+                }
+            else:
+                algo = {
+                    'name': 'RSASSA-PKCS1-v1_5',
+                    'hash': {'name': "SHA-256"},
+                }
+
+            cert_json = {
+                'issuer':  make_json_relative_distinguished_name(cert.issuer),
+                'subject': make_json_relative_distinguished_name(cert.subject),
+                'notValidBefore': cert.not_valid_before.isoformat(),
+                'notValidAfter':  cert.not_valid_after.isoformat(),
+                'publicKey': pubkey_json,
+                'algorithm': algo,
+            }
+
+            certs_json[key_id.hex()] = cert_json
+
+        json_doc = {
+            'timestamp': datetime.utcnow().isoformat()+'Z',
+            'trustList': certs_json,
+        }
+
+        with open(certs_path, 'w') as text_stream:
+            json.dump(json_doc, text_stream)
+
+    elif lower_ext == '.cbor':
+        # same CBOR format as AT trust list
+        cert_list: List[dict] = []
+        for key_id, cert in certs.items():
+            try:
+                cert_bytes = cert.public_bytes(Encoding.DER)
+            except NotImplementedError as error:
+                print_err(f'Cannot store entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")} in CBOR trust list: {error}')
+            else:
+                cert_list.append({
+                    'i': key_id,
+                    'c': cert_bytes,
+                })
+        with open(certs_path, 'wb') as fp:
+            cbor2.dump({'c': cert_list}, fp)
+    else:
+        raise ValueError(f'Unsupported certificates file extension: {ext!r}')
+
 def main() -> None:
     ap = argparse.ArgumentParser()
 
@@ -1037,7 +1104,7 @@ def main() -> None:
     ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
     ap.add_argument('--print-exts', action='store_true', help='Also print certificate extensions.')
     ap.add_argument('--strip-revoked', action='store_true', help='Strip revoked certificates. (Downloads certificate revocation list, if supported by certificate.)')
-    ap.add_argument('--save-certs', metavar='FILE', help='Store downloaded certificates to FILE. The filetype is derived from the extension, which can be .json or .cbor')
+    ap.add_argument('--save-certs', metavar='FILE', action='append', help='Store downloaded certificates to FILE. The filetype is derived from the extension, which can be .json or .cbor')
 
     ap.add_argument('--image', action='store_true', default=False, help='ehc_code is a path to an image file containing a QR-code.')
     ap.add_argument('ehc_code', nargs='*', help='Scanned EHC QR-code, or when --image is passed path to an image file.')
@@ -1066,71 +1133,8 @@ def main() -> None:
             certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')])
 
         if args.save_certs:
-            ext = splitext(args.save_certs)[1]
-            lower_ext = ext.lower()
-            if lower_ext == '.json':
-                from jwcrypto.jwk import JWK # type: ignore
-
-                # JSON that includes all info in a format as needed by WebCrypto, I hope
-                certs_json = {}
-                for key_id, cert in certs.items():
-                    pubkey = cert.public_key()
-                    pubkey_jwk = JWK.from_pyca(pubkey)
-                    pubkey_json = pubkey_jwk.export(as_dict=True, private_key=False)
-                    pubkey_json['key_ops'] = ['verify']
-
-                    # not sure about this:
-                    pubkey_json['kid'] = urlsafe_b64encode(key_id).decode('ASCII')
-
-                    # even less sure about this:
-                    if pubkey_json['kty'] == 'EC':
-                        algo = {
-                            'name': 'ECDSA',
-                            'namedCurve': pubkey_json['crv'],
-                            'hash': {'name': "SHA-256"},
-                        }
-                    else:
-                        algo = {
-                            'name': 'RSASSA-PKCS1-v1_5',
-                            'hash': {'name': "SHA-256"},
-                        }
-
-                    cert_json = {
-                        'issuer':  make_json_relative_distinguished_name(cert.issuer),
-                        'subject': make_json_relative_distinguished_name(cert.subject),
-                        'notValidBefore': cert.not_valid_before.isoformat(),
-                        'notValidAfter':  cert.not_valid_after.isoformat(),
-                        'publicKey': pubkey_json,
-                        'algorithm': algo,
-                    }
-
-                    certs_json[key_id.hex()] = cert_json
-
-                json_doc = {
-                    'timestamp': datetime.utcnow().isoformat()+'Z',
-                    'trustList': certs_json,
-                }
-
-                with open(args.save_certs, 'w') as text_stream:
-                    json.dump(json_doc, text_stream)
-
-            elif lower_ext == '.cbor':
-                # same CBOR format as AT trust list
-                cert_list: List[dict] = []
-                for key_id, cert in certs.items():
-                    try:
-                        cert_bytes = cert.public_bytes(Encoding.DER)
-                    except NotImplementedError as error:
-                        print_err(f'Cannot store entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")} in CBOR trust list: {error}')
-                    else:
-                        cert_list.append({
-                            'i': key_id,
-                            'c': cert_bytes,
-                        })
-                with open(args.save_certs, 'wb') as fp:
-                    cbor2.dump({'c': cert_list}, fp)
-            else:
-                raise ValueError(f'Unsupported certificates file extension: {ext!r}')
+            for certs_path in args.save_certs:
+                save_certs(certs, certs_path)
 
         items: List[Tuple[bytes, x509.Certificate]]
         revoked_certs: Dict[bytes, x509.RevokedCertificate] = {}
