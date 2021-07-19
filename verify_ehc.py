@@ -148,7 +148,9 @@ CERTS_URL_FR = 'https://portail.tacv.myservices-ingroupe.com/api/client/configur
 CERTS_URL_SW = 'https://dgcg.covidbevis.se/tp/trust-list'
 
 # United Kingdom trust list:
-CERTS_URL_UK = 'https://covid-pass-verifier.com/assets/certificates.json'
+CERTS_URL_UK = 'https://covid-status.service.nhsx.nhs.uk/pubkeys/keys.json'
+
+CERTS_URL_COVID_PASS_VERIFIER = 'https://covid-pass-verifier.com/assets/certificates.json'
 
 # Norwegian trust list:
 CERTS_URL_NO = 'https://koronakontroll.nhn.no/v2/publickey'
@@ -516,7 +518,7 @@ def download_sw_certs() -> CertList:
                     certs[key_id] = cert
     return certs
 
-def download_uk_certs() -> CertList:
+def download_covid_pass_verifier_certs() -> CertList:
     certs: CertList = {}
     response = requests.get(CERTS_URL_UK, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
@@ -746,6 +748,24 @@ def download_no_certs(token: Optional[str] = None) -> CertList:
 
     return certs
 
+def download_uk_certs() -> CertList:
+    response = requests.get(CERTS_URL_UK, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+
+    certs: CertList = {}
+    # TODO: find out if there is some sort of root cert to verify the trust list?
+
+    certs_json = json.loads(response.content)
+
+    for entry in certs_json:
+        key_id = b64decode(entry['kid'])
+        pubkey_der = b64decode(entry['publicKey'])
+
+        cert = load_hack_certificate_from_der_public_key(pubkey_der)
+        certs[key_id] = cert
+
+    return certs
+
 DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'AT': download_at_certs,
     'CH': download_ch_certs,
@@ -756,6 +776,7 @@ DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'NO': download_no_certs,
     'SW': download_sw_certs,
     'UK': download_uk_certs,
+    'coivid-pass-verifier': download_covid_pass_verifier_certs,
 }
 
 def download_ehc_certs(sources: List[str]) -> CertList:
