@@ -1119,7 +1119,7 @@ def main() -> None:
     certs_ap.add_argument('--certs-from', metavar="LIST", help=
         "Download trust list from given country's trust list service. Comma separated list, entries from later country overwrites earlier.\n"
         "\n"
-        "Supported countries: AT, DE, FR, NL, SW, UK\n"
+        "Supported countries: AT, CH, DE, FR, NL, SW, UK\n"
         "\n"
         "FR needs the environment varialbe FR_TOKEN set to a bearer token that can be found in the TousAntiCovid Verif app.\n"
         "\n"
