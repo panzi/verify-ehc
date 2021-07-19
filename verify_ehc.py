@@ -530,7 +530,7 @@ def download_covid_pass_verifier_certs() -> CertList:
             try:
                 cert = load_der_x509_certificate(cert_der)
             except Exception as error:
-                print_err(f'decoding UK trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
+                print_err(f'decoding covid-pass-verifier.com trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
             else:
                 fingerprint = cert.fingerprint(hashes.SHA256())
                 if key_id != fingerprint[0:8]:
@@ -574,7 +574,7 @@ def download_covid_pass_verifier_certs() -> CertList:
                 certs[key_id] = cert
 
             else:
-                print_err(f'decoding UK trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: no supported public key data found')
+                print_err(f'decoding covid-pass-verifier.com trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: no supported public key data found')
     return certs
 
 def download_fr_certs(token: Optional[str] = None) -> CertList:
@@ -754,6 +754,13 @@ def download_uk_certs() -> CertList:
 
     certs: CertList = {}
     # TODO: find out if there is some sort of root cert to verify the trust list?
+
+    md5_b64 = response.headers.get('content-md5')
+    if md5_b64 is not None:
+        expected_md5 = b64decode(md5_b64)
+        actual_md5   = hashlib.md5(response.content).digest()
+        if expected_md5 != actual_md5:
+            raise ValueError(f'MD5 sum missmatch of UK trust list: expected: {expected_md5.hex()}, actual: {actual_md5.hex()}')
 
     certs_json = json.loads(response.content)
 
