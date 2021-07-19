@@ -110,6 +110,7 @@ for name in dir(cose.keys.curves):
 del name, curve
 
 PREFIX = 'HC1:'
+PREFIX_NO = 'NO1:' # Norway
 
 CLAIM_NAMES = {
     1: "Issuer",
@@ -149,12 +150,16 @@ CERTS_URL_SW = 'https://dgcg.covidbevis.se/tp/trust-list'
 # United Kingdom trust list:
 CERTS_URL_UK = 'https://covid-pass-verifier.com/assets/certificates.json'
 
+# Norwegian trust list:
+CERTS_URL_NO = 'https://koronakontroll.nhn.no/v2/publickey'
+# Norwegian COVID-19 certificates seem to be based on the European Health Certificate but just with an 'NO1:' prefix.
+# https://harrisonsand.com/posts/covid-certificates/
+
 # Switzerland:
 # See: https://github.com/cn-uofbasel/ch-dcc-keys
 ROOT_CERT_URL_CH = 'https://www.bit.admin.ch/dam/bit/en/dokumente/pki/scanning_center/swiss_governmentrootcaii.crt.download.crt/swiss_governmentrootcaii.crt'
 CERTS_URL_CH     = 'https://www.cc.bit.admin.ch/trust/v1/keys/list'
 UPDATE_URL_CH    = 'https://www.cc.bit.admin.ch/trust/v1/keys/updates?certFormat=ANDROID'
-# Don't know what the updates are.
 
 USER_AGENT = 'Mozilla/5.0 (Windows) Firefox/90.0'
 
@@ -711,6 +716,36 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
 
     return certs
 
+def download_no_certs(token: Optional[str] = None) -> CertList:
+    NO_USER_AGENT = 'FHICORC/38357 CFNetwork/1240.0.4 Darwin/20.5.0'
+
+    if token is None:
+        token = os.getenv('NO_TOKEN')
+        if token is None:
+            raise KeyError(
+                "Required environment variable NO_TOKEN for NO trust list is not set. "
+                "You can get the value of the token from the Kontroll av koronasertifikat application.")
+
+    response = requests.get(CERTS_URL_NO, headers={
+        'User-Agent': NO_USER_AGENT,
+        'Authorization': token,
+    })
+    response.raise_for_status()
+
+    certs: CertList = {}
+    # TODO: find out if there is some sort of root cert to verify the trust list?
+
+    certs_json = json.loads(response.content)
+
+    for entry in certs_json:
+        key_id = b64decode(entry['kid'])
+        pubkey_der = b64decode(entry['publicKey'])
+
+        cert = load_hack_certificate_from_der_public_key(pubkey_der)
+        certs[key_id] = cert
+
+    return certs
+
 DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'AT': download_at_certs,
     'CH': download_ch_certs,
@@ -718,6 +753,7 @@ DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'FR': download_fr_certs,
     'GB': download_uk_certs, # alias
     'NL': download_nl_certs,
+    'NO': download_no_certs,
     'SW': download_sw_certs,
     'UK': download_uk_certs,
 }
@@ -812,10 +848,10 @@ def urlsafe_b64decode_ignore_padding(b64str: str) -> bytes:
     return urlsafe_b64decode(b64str + "=" * ((4 - len(b64str) % 4) % 4))
 
 def decode_ehc(b45_data: str) -> CoseMessage:
-    if b45_data.startswith('HC1'):
-        b45_data = b45_data[3:]
-        if b45_data.startswith(':'):
-            b45_data = b45_data[1:]
+    if b45_data.startswith(PREFIX):
+        b45_data = b45_data[len(PREFIX):]
+    elif b45_data.startswith(PREFIX_NO):
+        b45_data = b45_data[len(PREFIX_NO):]
 
     try:
         data = b45decode(b45_data)
@@ -839,7 +875,7 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
 
     cert = certs.get(given_kid) # XXX: is this correct? is it not two levels of signed certificates?
     if not cert:
-        raise KeyError(f'Key ID not found in cert list: {given_kid.hex()}')
+        raise KeyError(f'Key ID not found in trust list: {given_kid.hex()}')
 
     pk = cert.public_key()
     print(f'Key Type       : {type(pk).__name__.strip("_")}')
