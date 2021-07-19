@@ -1086,17 +1086,46 @@ def save_certs(certs: CertList, certs_path: str) -> None:
     else:
         raise ValueError(f'Unsupported certificates file extension: {ext!r}')
 
+class SmartFormatter(argparse.HelpFormatter):
+    def _split_lines(self, text: str, width: int):
+        lines: List[str] = []
+        for line_str in text.split('\n'):
+            line: List[str] = []
+            line_len = 0
+            for word in line_str.split():
+                word_len = len(word)
+                next_len = line_len + word_len
+                if line: next_len += 1
+                if next_len > width:
+                    lines.append(' '.join(line))
+                    line.clear()
+                    line_len = 0
+                elif line:
+                    line_len += 1
+
+                line.append(word)
+                line_len += word_len
+
+            lines.append(' '.join(line))
+        return lines
+
 def main() -> None:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(formatter_class=SmartFormatter, epilog=
+        'Report issues to: https://github.com/panzi/verify-ehc/issues')
 
     certs_ap = ap.add_mutually_exclusive_group()
-    certs_ap.add_argument('--certs-file', metavar="FILE", help='Trust list in CBOR format. If not given it will be downloaded from the internet.')
+    certs_ap.add_argument('--certs-file', metavar="FILE", help=
+        'Trust list in CBOR or JSON format.')
     certs_ap.add_argument('--certs-from', metavar="LIST", help=
-        "Download trust list from given country's trust list service. Entries from later country overwrites earlier. "
-        "Supported countries: AT, DE, FR, NL, SW, UK (comma separated list). "
-        "FR needs the environment varialbe FR_TOKEN set to a bearer token that can be found in the TousAntiCovid Verif app. "
-        "CH needs the environment variable CH_TOKEN set to a bearer token that can be found in the BIT's Android CovidCertificate app. See also: https://github.com/cn-uofbasel/ch-dcc-keys "
-        "(default: DE,AT)",
+        "Download trust list from given country's trust list service. Comma separated list, entries from later country overwrites earlier.\n"
+        "\n"
+        "Supported countries: AT, DE, FR, NL, SW, UK\n"
+        "\n"
+        "FR needs the environment varialbe FR_TOKEN set to a bearer token that can be found in the TousAntiCovid Verif app.\n"
+        "\n"
+        "CH needs the environment variable CH_TOKEN set to a bearer token that can be found in the BIT's Android CovidCertificate app. See also: https://github.com/cn-uofbasel/ch-dcc-keys\n"
+        "\n"
+        "If neither --certs-file nor --certs-from is given then --certs-from=DE,AT is used as default.\n",
         default='DE,AT')
 
     ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
@@ -1130,7 +1159,12 @@ def main() -> None:
             else:
                 certs = load_ehc_certs(args.certs_file)
         else:
-            certs = download_ehc_certs([country.strip().upper() for country in args.certs_from.split(',')])
+            sources_str = args.certs_from.strip()
+            sources = [country.strip().upper() for country in sources_str.split(',')] if sources_str else []
+            certs = download_ehc_certs(sources)
+
+        if not certs:
+            print_err("empty trust list!")
 
         if args.save_certs:
             for certs_path in args.save_certs:

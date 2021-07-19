@@ -48,18 +48,25 @@ positional arguments:
 
 optional arguments:
   -h, --help         show this help message and exit
-  --certs-file FILE  Trust list in CBOR format. If not given it will be
-                     downloaded from the internet.
+  --certs-file FILE  Trust list in CBOR or JSON format.
   --certs-from LIST  Download trust list from given country's trust list
-                     service. Entries from later country overwrites earlier.
-                     Supported countries: AT, DE, FR, NL, SW, UK (comma
-                     separated list). FR needs the environment varialbe
-                     FR_TOKEN set to a bearer token that can be found in the
-                     TousAntiCovid Verif app. CH needs the environment
-                     variable CH_TOKEN set to a bearer token that can be found
-                     in the BIT's Android CovidCertificate app. See also:
-                     https://github.com/cn-uofbasel/ch-dcc-keys (default:
-                     DE,AT)
+                     service. Comma separated list, entries from later country
+                     overwrites earlier.
+                     
+                     Supported countries: AT, DE, FR, NL, SW, UK
+                     
+                     FR needs the environment varialbe FR_TOKEN set to a
+                     bearer token that can be found in the TousAntiCovid Verif
+                     app.
+                     
+                     CH needs the environment variable CH_TOKEN set to a
+                     bearer token that can be found in the BIT's Android
+                     CovidCertificate app. See also:
+                     https://github.com/cn-uofbasel/ch-dcc-keys
+                     
+                     If neither --certs-file nor --certs-from is given then
+                     --certs-from=DE,AT is used as default.
+                     
   --no-verify        Skip certificate verification.
   --list-certs       List certificates from trust list.
   --print-exts       Also print certificate extensions.
