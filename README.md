@@ -48,50 +48,58 @@ Usage
 ```plain
 usage: verify_ehc.py [-h] [--certs-file FILE | --certs-from LIST]
                      [--no-verify] [--list-certs] [--print-exts]
-                     [--strip-revoked] [--save-certs FILE] [--image]
+                     [--strip-revoked] [--save-certs FILE]
+                     [--allow-public-key-only] [--image]
                      [ehc_code ...]
 
 positional arguments:
-  ehc_code           Scanned EHC QR-code, or when --image is passed path to an
-                     image file.
+  ehc_code              Scanned EHC QR-code, or when --image is passed path to
+                        an image file.
 
 optional arguments:
-  -h, --help         show this help message and exit
-  --certs-file FILE  Trust list in CBOR or JSON format.
-  --certs-from LIST  Download trust list from given country's trust list
-                     service. Comma separated list, entries from later country
-                     overwrites earlier.
-                     
-                     Supported countries: AT, CH, DE, FR, NL, NO, SW, UK
-                     
-                     CH needs the environment variable CH_TOKEN set to a
-                     bearer token that can be found in the BIT's Android
-                     CovidCertificate app APK. See also:
-                     https://github.com/cn-uofbasel/ch-dcc-keys
-                     
-                     FR needs the environment varialbe FR_TOKEN set to a
-                     bearer token that can be found in the TousAntiCovid Verif
-                     app APK.
-                     
-                     NO needs the environment variable NO_TOKEN set to a
-                     AuthorizationHeader string that can be found in the
-                     Kontroll av koronasertifikat app APK. See also:
-                     https://harrisonsand.com/posts/covid-certificates/
-                     
-                     Note that the UK trust list only contains UK public keys,
-                     so you might want to combine it with another.
-                     
-                     If neither --certs-file nor --certs-from is given then
-                     --certs-from=DE,AT is used as default.
-                     
-  --no-verify        Skip certificate verification.
-  --list-certs       List certificates from trust list.
-  --print-exts       Also print certificate extensions.
-  --strip-revoked    Strip revoked certificates. (Downloads certificate
-                     revocation list, if supported by certificate.)
-  --save-certs FILE  Store downloaded certificates to FILE. The filetype is
-                     derived from the extension, which can be .json or .cbor
-  --image            ehc_code is a path to an image file containing a QR-code.
+  -h, --help            show this help message and exit
+  --certs-file FILE     Trust list in CBOR or JSON format.
+  --certs-from LIST     Download trust list from given country's trust list
+                        service. Comma separated list, entries from later
+                        country overwrites earlier.
+                        
+                        Supported countries: AT, CH, DE, FR, NL, NO, SW, UK
+                        
+                        CH needs the environment variable CH_TOKEN set to a
+                        bearer token that can be found in the BIT's Android
+                        CovidCertificate app APK. See also:
+                        https://github.com/cn-uofbasel/ch-dcc-keys
+                        
+                        FR needs the environment varialbe FR_TOKEN set to a
+                        bearer token that can be found in the TousAntiCovid
+                        Verif app APK.
+                        
+                        NO needs the environment variable NO_TOKEN set to a
+                        AuthorizationHeader string that can be found in the
+                        Kontroll av koronasertifikat app APK. See also:
+                        https://harrisonsand.com/posts/covid-certificates/
+                        
+                        Note that the UK trust list only contains UK public
+                        keys, so you might want to combine it with another.
+                        
+                        If neither --certs-file nor --certs-from is given then
+                        --certs-from=DE,AT is used as default.
+                        
+  --no-verify           Skip certificate verification.
+  --list-certs          List certificates from trust list.
+  --print-exts          Also print certificate extensions.
+  --strip-revoked       Strip revoked certificates. (Downloads certificate
+                        revocation list, if supported by certificate.)
+  --save-certs FILE     Store downloaded trust list to FILE. The filetype is
+                        derived from the extension, which can be .json or
+                        .cbor
+  --allow-public-key-only, --allow-pubkey-only
+                        When writing the CBOR trust list format it usually
+                        rejects entries that are only public keys and not full
+                        x509 certificates. With this options it also writes
+                        entries that are only public keys.
+  --image               ehc_code is a path to an image file containing a
+                        QR-code.
 ```
 
 You can also use this tool to download the trust list as provided of one (or

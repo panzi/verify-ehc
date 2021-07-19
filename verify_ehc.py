@@ -168,6 +168,8 @@ USER_AGENT = 'Mozilla/5.0 (Windows) Firefox/90.0'
 # See also this thread:
 # https://github.com/eu-digital-green-certificates/dgc-participating-countries/issues/10
 
+DEFAULT_NOT_VALID_BEFORE = datetime(1970, 1, 1, tzinfo=timezone.utc)
+DEFAULT_NOT_VALID_AFTER  = datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc)
 
 class HackCertificate(x509.Certificate):
     _public_key: Union[EllipticCurvePublicKey, RSAPublicKey]
@@ -181,8 +183,8 @@ class HackCertificate(x509.Certificate):
         public_key: Union[EllipticCurvePublicKey, RSAPublicKey],
         issuer:  Optional[Name] = None,
         subject: Optional[Name] = None,
-        not_valid_before: datetime = datetime(1970, 1, 1, tzinfo=timezone.utc),
-        not_valid_after:  datetime = datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc),
+        not_valid_before: datetime = DEFAULT_NOT_VALID_BEFORE,
+        not_valid_after:  datetime = DEFAULT_NOT_VALID_AFTER,
     ):
         self._public_key = public_key
         self._issuer  = issuer  if issuer  is not None else Name([])
@@ -278,11 +280,28 @@ def load_ehc_certs_cbor(cbor_data: bytes) -> CertList:
     certs: CertList = {}
     for item in certs_data['c']:
         key_id = item['i']
-        cert_data = item['c']
-        cert = load_der_x509_certificate(cert_data)
-        fingerprint = cert.fingerprint(hashes.SHA256())
-        if key_id != fingerprint[0:8]:
-            raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+        cert_data = item.get('c')
+        if cert_data:
+            cert = load_der_x509_certificate(cert_data)
+            fingerprint = cert.fingerprint(hashes.SHA256())
+            if key_id != fingerprint[0:8]:
+                raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+        else:
+            pubkey_data = item['k']
+            pubkey = load_der_public_key(pubkey_data)
+
+            nb = item.get('nb')
+            not_valid_before = EPOCH + timedelta(seconds=nb) if nb is not None else DEFAULT_NOT_VALID_BEFORE
+
+            na = item.get('na')
+            not_valid_after = EPOCH + timedelta(seconds=na) if na is not None else DEFAULT_NOT_VALID_AFTER
+
+            if isinstance(pubkey, (EllipticCurvePublicKey, RSAPublicKey)):
+                cert = HackCertificate(pubkey, not_valid_before=not_valid_before, not_valid_after=not_valid_after)
+            else:
+                pubkey_type = type(pubkey)
+                raise TypeError(f'unhandeled public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
         certs[key_id] = cert
 
@@ -1083,7 +1102,7 @@ def parse_env(data: str) -> Dict[str, str]:
             env[key] = value
     return env
 
-def save_certs(certs: CertList, certs_path: str) -> None:
+def save_certs(certs: CertList, certs_path: str, allow_public_key_only: bool = False) -> None:
     ext = splitext(certs_path)[1]
     lower_ext = ext.lower()
     if lower_ext == '.json':
@@ -1136,15 +1155,30 @@ def save_certs(certs: CertList, certs_path: str) -> None:
         # same CBOR format as AT trust list
         cert_list: List[dict] = []
         for key_id, cert in certs.items():
-            try:
-                cert_bytes = cert.public_bytes(Encoding.DER)
-            except NotImplementedError as error:
-                print_err(f'Cannot store entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")} in CBOR trust list: {error}')
+            if allow_public_key_only and isinstance(cert, HackCertificate):
+                entry = {
+                    'k': cert.public_key().public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo),
+                }
+
+                not_valid_before = cert.not_valid_before
+                if not_valid_before is not DEFAULT_NOT_VALID_BEFORE:
+                    entry['nb'] = int(not_valid_before.timestamp())
+
+                not_valid_after = cert.not_valid_before
+                if not_valid_after is not DEFAULT_NOT_VALID_AFTER:
+                    entry['na'] = int(not_valid_after.timestamp())
+
+                cert_list.append(entry)
             else:
-                cert_list.append({
-                    'i': key_id,
-                    'c': cert_bytes,
-                })
+                try:
+                    cert_bytes = cert.public_bytes(Encoding.DER)
+                except NotImplementedError as error:
+                    print_err(f'Cannot store entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")} in CBOR trust list: {error}')
+                else:
+                    cert_list.append({
+                        'i': key_id,
+                        'c': cert_bytes,
+                    })
         with open(certs_path, 'wb') as fp:
             cbor2.dump({'c': cert_list}, fp)
     else:
@@ -1201,7 +1235,10 @@ def main() -> None:
     ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
     ap.add_argument('--print-exts', action='store_true', help='Also print certificate extensions.')
     ap.add_argument('--strip-revoked', action='store_true', help='Strip revoked certificates. (Downloads certificate revocation list, if supported by certificate.)')
-    ap.add_argument('--save-certs', metavar='FILE', action='append', help='Store downloaded certificates to FILE. The filetype is derived from the extension, which can be .json or .cbor')
+    ap.add_argument('--save-certs', metavar='FILE', action='append', help='Store downloaded trust list to FILE. The filetype is derived from the extension, which can be .json or .cbor')
+    ap.add_argument('--allow-public-key-only', '--allow-pubkey-only', action='store_true', help=
+        'When writing the CBOR trust list format it usually rejects entries that are only public keys and not full x509 certificates. '
+        'With this options it also writes entries that are only public keys.')
 
     ap.add_argument('--image', action='store_true', default=False, help='ehc_code is a path to an image file containing a QR-code.')
     ap.add_argument('ehc_code', nargs='*', help='Scanned EHC QR-code, or when --image is passed path to an image file.')
@@ -1233,10 +1270,6 @@ def main() -> None:
 
         if not certs:
             print_err("empty trust list!")
-
-        if args.save_certs:
-            for certs_path in args.save_certs:
-                save_certs(certs, certs_path)
 
         items: List[Tuple[bytes, x509.Certificate]]
         revoked_certs: Dict[bytes, x509.RevokedCertificate] = {}
@@ -1288,6 +1321,10 @@ def main() -> None:
         if args.strip_revoked:
             for key_id in revoked_certs:
                 del certs[key_id]
+
+        if args.save_certs:
+            for certs_path in args.save_certs:
+                save_certs(certs, certs_path, args.allow_public_key_only)
 
     ehc_codes: List[str] = []
     if args.image:
