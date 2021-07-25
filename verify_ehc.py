@@ -612,7 +612,7 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
     response.raise_for_status()
     certs_json = json.loads(response.content)
     for key_id_b64, cert_b64 in certs_json['certificatesDCC'].items():
-        key_id = b64decode(key_id_b64)
+        key_id = b64decode_ignore_padding(key_id_b64)
         cert_pem = b64decode(cert_b64)
 
         # Yes, they encode it twice!
@@ -911,18 +911,27 @@ def decode_ehc(b45_data: str) -> CoseMessage:
     msg: CoseMessage = CoseMessage.decode(data)
     return msg
 
+def format_key_id(key_id: bytes) -> str:
+    key_id_hex = key_id.hex()
+    key_id_b64 = b64encode(key_id).decode("ASCII")
+    if all(byte >= 0x21 and byte <= 0x7E for byte in key_id):
+        return f'{key_id_hex} / {key_id_b64} / {key_id.decode("ASCII")}'
+
+    return f'{key_id_hex} / {key_id_b64}'
+
 def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_exts: bool = False) -> bool:
     cose_algo = msg.phdr.get(Algorithm) or msg.uhdr.get(Algorithm)
     print(f'COSE Sig. Algo.: {cose_algo.fullname if cose_algo is not None else "N/A"}')
     if isinstance(msg, Sign1Message):
         print(f'Signature      : {b64encode(msg.signature).decode("ASCII")}')
 
-    given_kid = msg.phdr.get(KID) or msg.uhdr[KID]
-    print(f'Key ID         : {given_kid.hex()} / {b64encode(given_kid).decode("ASCII")}')
+    # TODO: warn if key_id is in uhdr (unprotected header)?
+    key_id = msg.phdr.get(KID) or msg.uhdr[KID]
+    print(f'Key ID         : {format_key_id(key_id)}')
 
-    cert = certs.get(given_kid) # XXX: is this correct? is it not two levels of signed certificates?
+    cert = certs.get(key_id) # XXX: is this correct? is it not two levels of signed certificates?
     if not cert:
-        raise KeyError(f'Key ID not found in trust list: {given_kid.hex()}')
+        raise KeyError(f'Key ID not found in trust list: {key_id.hex()}')
 
     pk = cert.public_key()
     print(f'Key Type       : {type(pk).__name__.strip("_")}')
@@ -1038,9 +1047,7 @@ def get_cached_crl(uri: str) -> x509.CertificateRevocationList:
     crl_status[uri] = status_code
 
     if response.status_code >= 400 and response.status_code < 600:
-        msg = f'{uri} {status_code} {http.client.responses.get(status_code, "")}'
-        print_err(f'loading revokation list {msg}')
-        raise ValueError(msg)
+        raise ValueError(f'{uri} {status_code} {http.client.responses.get(status_code, "")}')
 
     crl_bytes = response.content
     if crl_bytes.startswith(b'-----BEGIN'):
@@ -1286,7 +1293,7 @@ def main() -> None:
 
         if args.list_certs:
             for key_id, cert in items:
-                print('Key ID          :', key_id.hex(), '/', b64encode(key_id).decode("ASCII"))
+                print('Key ID          :', format_key_id(key_id))
                 if not isinstance(cert, HackCertificate):
                     print('Serial Nr.      :', ":".join("%02x" % byte for byte in cert.serial_number.to_bytes(20, byteorder="big")))
                 print('Issuer          :', cert.issuer.rfc4514_string())
