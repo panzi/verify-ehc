@@ -93,13 +93,13 @@ SECG_TO_NIST_CURVES: Dict[str, str] = {curve.name: name for name, curve in NIST_
 
 NAME_OIDS = {name: name_oid for name_oid, name in _NAMEOID_TO_NAME.items()}
 
-NAME_OIDS_UK = dict(
+NAME_OIDS_COVID_PASS_VERIFIER = dict(
     postalCode             = NameOID.POSTAL_CODE,
     street                 = NameOID.STREET_ADDRESS,
     organizationIdentifier = NameOID.ORGANIZATION_NAME,
     serialNumber           = NameOID.SERIAL_NUMBER,
 )
-NAME_OIDS_UK.update(NAME_OIDS)
+NAME_OIDS_COVID_PASS_VERIFIER.update(NAME_OIDS)
 
 for name in dir(cose.keys.curves):
     if not name.startswith('_'):
@@ -559,13 +559,13 @@ def download_covid_pass_verifier_certs() -> CertList:
         else:
             iss = entry.get('iss')
             if iss:
-                issuer = Name([NameAttribute(NAME_OIDS_UK.get(key) or ObjectIdentifier(key), value) for key, value in iss.items()])
+                issuer = Name([NameAttribute(NAME_OIDS_COVID_PASS_VERIFIER.get(key) or ObjectIdentifier(key), value) for key, value in iss.items()])
             else:
                 issuer = Name([])
 
             sub = entry.get('sub')
             if sub:
-                subject = Name([NameAttribute(NAME_OIDS_UK.get(key) or ObjectIdentifier(key), value) for key, value in sub.items()])
+                subject = Name([NameAttribute(NAME_OIDS_COVID_PASS_VERIFIER.get(key) or ObjectIdentifier(key), value) for key, value in sub.items()])
             else:
                 subject = Name([])
 
@@ -787,7 +787,11 @@ def download_uk_certs() -> CertList:
         key_id = b64decode(entry['kid'])
         pubkey_der = b64decode(entry['publicKey'])
 
-        cert = load_hack_certificate_from_der_public_key(pubkey_der)
+        cert = load_hack_certificate_from_der_public_key(
+            pubkey_der,
+            Name([NameAttribute(NameOID.COUNTRY_NAME, 'UK')]),
+            Name([NameAttribute(NameOID.COUNTRY_NAME, 'UK')]),
+        )
         certs[key_id] = cert
 
     return certs
@@ -877,13 +881,18 @@ def load_jwt(token: bytes, root_cert: x509.Certificate) -> Dict[str, Any]:
 
     return jwt.decode(token, key=sigkey)
 
-def load_hack_certificate_from_der_public_key(data: bytes) -> HackCertificate:
+def load_hack_certificate_from_der_public_key(data: bytes,
+    issuer:  Optional[Name] = None,
+    subject: Optional[Name] = None,
+    not_valid_before: datetime = DEFAULT_NOT_VALID_BEFORE,
+    not_valid_after:  datetime = DEFAULT_NOT_VALID_AFTER,
+) -> HackCertificate:
     pubkey = load_der_public_key(data)
 
     if isinstance(pubkey, EllipticCurvePublicKey):
-        return HackCertificate(pubkey)
+        return HackCertificate(pubkey, issuer, subject, not_valid_before, not_valid_after)
     elif isinstance(pubkey, RSAPublicKey):
-        return HackCertificate(pubkey)
+        return HackCertificate(pubkey, issuer, subject, not_valid_before, not_valid_after)
     else:
         pubkey_type = type(pubkey)
         raise TypeError(f'unhandeled public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
