@@ -127,6 +127,49 @@ OLD_SIGNS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/sigv2'
 # Trust List used by Austrian greencheck app:
 CERTS_URL_AT = 'https://greencheck.gv.at/api/masterdata'
 
+CERTS_URL_AT_PROD = 'https://dgc-trust.qr.gv.at/trustlist'
+SIGN_URL_AT_PROD  = 'https://dgc-trust.qr.gv.at/trustlistsig'
+
+CERTS_URL_AT_TEST = 'https://dgc-trusttest.qr.gv.at/trustlist'
+SIGN_URL_AT_TEST  = 'https://dgc-trusttest.qr.gv.at/trustlistsig'
+
+# These root certs are copied from some presentation slides.
+# TODO: Link a proper source here once it becomes available.
+#
+# TODO: keep up to date
+# Not Before: Jun  2 13:46:21 2021 GMT
+# Not After : Jul  2 13:46:21 2022 GMT
+ROOT_CERT_AT_PROD = b'''\
+-----BEGIN CERTIFICATE-----
+MIIB1DCCAXmgAwIBAgIKAXnM+Z3eG2QgVzAKBggqhkjOPQQDAjBEMQswCQYDVQQG
+EwJBVDEPMA0GA1UECgwGQk1TR1BLMQwwCgYDVQQFEwMwMDExFjAUBgNVBAMMDUFU
+IERHQyBDU0NBIDEwHhcNMjEwNjAyMTM0NjIxWhcNMjIwNzAyMTM0NjIxWjBFMQsw
+CQYDVQQGEwJBVDEPMA0GA1UECgwGQk1TR1BLMQ8wDQYDVQQFEwYwMDEwMDExFDAS
+BgNVBAMMC0FUIERHQyBUTCAxMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEl2tm
+d16CBHXwcBN0r1Uy+CmNW/b2V0BNP85y5N3JZeo/8l9ey/jIe5mol9fFcGTk9bCk
+8zphVo0SreHa5aWrQKNSMFAwDgYDVR0PAQH/BAQDAgeAMB0GA1UdDgQWBBRTwp6d
+cDGcPUB6IwdDja/a3ncM0TAfBgNVHSMEGDAWgBQfIqwcZRYptMGYs2Nvv90Jnbt7
+ezAKBggqhkjOPQQDAgNJADBGAiEAlR0x3CRuQV/zwHTd2R9WNqZMabXv5XqwHt72
+qtgnjRgCIQCZHIHbCvlgg5uL8ZJQzAxLavqF2w6uUxYVrvYDj2Cqjw==
+-----END CERTIFICATE-----
+'''
+
+ROOT_CERT_AT_TEST = b'''\
+-----BEGIN CERTIFICATE-----
+MIIB6zCCAZGgAwIBAgIKAXmEuohlRbR2qzAKBggqhkjOPQQDAjBQMQswCQYDVQQG
+EwJBVDEPMA0GA1UECgwGQk1TR1BLMQowCAYDVQQLDAFRMQwwCgYDVQQFEwMwMDEx
+FjAUBgNVBAMMDUFUIERHQyBDU0NBIDEwHhcNMjEwNTE5MTMwNDQ3WhcNMjIwNjE5
+MTMwNDQ3WjBRMQswCQYDVQQGEwJBVDEPMA0GA1UECgwGQk1TR1BLMQowCAYDVQQL
+DAFRMQ8wDQYDVQQFEwYwMDEwMDExFDASBgNVBAMMC0FUIERHQyBUTCAxMFkwEwYH
+KoZIzj0CAQYIKoZIzj0DAQcDQgAE29KpT1eIKsy5Jx3J0xpPLW+fEBF7ma9943/j
+4Z+o1TytLVok9cWjsdasWCS/zcRyAh7HBL+oyMWdFBOWENCQ76NSMFAwDgYDVR0P
+AQH/BAQDAgeAMB0GA1UdDgQWBBQYmsL5sXTdMCyW4UtP5BMxq+UAVzAfBgNVHSME
+GDAWgBR2sKi2xkUpGC1Cr5ehwL0hniIsJzAKBggqhkjOPQQDAgNIADBFAiBse17k
+F5F43q9mRGettRDLprASrxsDO9XxUUp3ObjcWQIhALfUWnserGEPiD7Pa25tg9lj
+wkrqDrMdZHZ39qb+Jf/E
+-----END CERTIFICATE-----
+'''
+
 # Trust List used by German Digitaler-Impfnachweis app:
 CERTS_URL_DE  = 'https://de.dscg.ubirch.com/trustList/DSC/'
 PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/Certificates/PROD_RKI/CA/pubkey.pem'
@@ -145,7 +188,7 @@ CERTS_URL_NL = 'https://verifier-api.acc.coronacheck.nl/v4/verifier/public_keys'
 CERTS_URL_FR = 'https://portail.tacv.myservices-ingroupe.com/api/client/configuration/synchronisation/tacv'
 
 # Sweden (JOSE encoded):
-CERTS_URL_SW = 'https://dgcg.covidbevis.se/tp/trust-list'
+CERTS_URL_SE = 'https://dgcg.covidbevis.se/tp/trust-list'
 
 # United Kingdom trust list:
 CERTS_URL_UK = 'https://covid-status.service.nhsx.nhs.uk/pubkeys/keys.json'
@@ -438,7 +481,8 @@ def download_at_certs() -> CertList:
 
     sig_msg = CoseMessage.decode(certs_sig)
     if not isinstance(sig_msg, Sign1Message):
-        raise TypeError(f'AT trust list: expected signature to be a Sign1 COSE message')
+        msg_type = type(sig_msg)
+        raise TypeError(f'AT trust list: expected signature to be a Sign1 COSE message, but is: {msg_type.__module__}.{msg_type.__name__}')
 
     root_cert_key_id = sig_msg.phdr.get(KID) or sig_msg.uhdr[KID]
 
@@ -506,6 +550,80 @@ def download_at_certs() -> CertList:
 
     return load_ehc_certs_cbor(certs_cbor, 'AT')
 
+def download_at_certs_new(test: bool = False, token: Optional[str] = None) -> CertList:
+    # TODO: update to handle tokens once required
+    #if token is None:
+    #    token = os.getenv('AT_TOKEN')
+    #    if token is None:
+    #        raise KeyError(
+    #            'Required environment variable AT_TOKEN for AT trust list is not set. '
+    #            'Information about how to get a token will follow soon.')
+
+    if test:
+        certs_url     = CERTS_URL_AT_TEST
+        sign_url      = SIGN_URL_AT_TEST
+        root_cert_pem = ROOT_CERT_AT_TEST
+    else:
+        certs_url     = CERTS_URL_AT_PROD
+        sign_url      = SIGN_URL_AT_PROD
+        root_cert_pem = ROOT_CERT_AT_PROD
+
+    # TODO: Maybe look if there is a revocation list URL in root_cert.extensions?
+    root_cert = load_pem_x509_certificate(root_cert_pem)
+
+    response = requests.get(certs_url, headers={'User-Agent': USER_AGENT})
+    #response = requests.get(certs_url, headers={
+    #    'User-Agent': USER_AGENT,
+    #    'Authorization': f'Bearer {token}',
+    #})
+    response.raise_for_status()
+    certs_cbor = response.content
+
+    response = requests.get(sign_url, headers={'User-Agent': USER_AGENT})
+    #response = requests.get(sign_url, headers={
+    #    'User-Agent': USER_AGENT,
+    #    'Authorization': f'Bearer {token}',
+    #})
+    response.raise_for_status()
+    certs_sig = response.content
+
+    sig_msg = CoseMessage.decode(certs_sig)
+    if not isinstance(sig_msg, Sign1Message):
+        msg_type = type(sig_msg)
+        raise TypeError(f'AT trust list: expected signature to be a Sign1 COSE message, but is: {msg_type.__module__}.{msg_type.__name__}')
+
+    root_cert_key_id = sig_msg.phdr.get(KID) or sig_msg.uhdr[KID]
+
+    key_id = root_cert.fingerprint(hashes.SHA256())[:8]
+    if key_id != root_cert_key_id:
+        raise ValueError(f'AT trust list root certificate key ID missmatch. {key_id.hex()} != {root_cert_key_id.hex()}')
+
+    now = datetime.utcnow()
+    if now < root_cert.not_valid_before:
+        raise ValueError(f'AT trust list root certificate not yet valid: {now.isoformat()} < {root_cert.not_valid_before.isoformat()}')
+
+    if now > root_cert.not_valid_after:
+        raise ValueError(f'AT trust list root certificate already expired: {now.isoformat()} > {root_cert.not_valid_after.isoformat()}')
+
+    sig_msg.key = cert_to_cose_key(root_cert)
+
+    if not sig_msg.verify_signature():
+        raise ValueError(f'Invalid signature of AT trust list: {sig_msg.signature.hex()}')
+
+    sig = cbor2.loads(sig_msg.payload)
+    digest = hashlib.sha256(certs_cbor).digest()
+
+    if sig[2] != digest:
+        raise ValueError(f'Invalid hash of AT trust list. expected: {sig[2].hex()}, actual: {digest.hex()}')
+
+    created_at = EPOCH + timedelta(seconds=sig[5]) # I guess? Or "not valid before"?
+    expires_at = EPOCH + timedelta(seconds=sig[4])
+
+    if now > expires_at:
+        raise ValueError(f'AT trust list already expired at {expires_at.isoformat()}')
+
+    return load_ehc_certs_cbor(certs_cbor, 'AT')
+
 def download_de_certs() -> CertList:
     response = requests.get(CERTS_URL_DE, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
@@ -527,10 +645,10 @@ def download_de_certs() -> CertList:
 
     return load_de_trust_list(certs_signed_json, pubkey)
 
-def download_sw_certs() -> CertList:
+def download_se_certs() -> CertList:
     certs: CertList = {}
     # TODO: find out how to verify signature?
-    response = requests.get(CERTS_URL_SW, headers={'User-Agent': USER_AGENT})
+    response = requests.get(CERTS_URL_SE, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
     token_str = response.content.decode(response.encoding)
     token = jwt.get_unverified_claims(token_str)
@@ -542,14 +660,14 @@ def download_sw_certs() -> CertList:
                 try:
                     cert = load_der_x509_certificate(b64decode_ignore_padding(key_data))
                 except Exception as error:
-                    print_err(f'decoding SW trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
+                    print_err(f'decoding SE trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
                 else:
                     fingerprint = cert.fingerprint(hashes.SHA256())
                     if key_id != fingerprint[0:8]:
                         raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
                 if key_id in certs:
-                    print_err(f'doubled key ID in SW trust list, only using last: {format_key_id(key_id)}')
+                    print_err(f'doubled key ID in SE trust list, only using last: {format_key_id(key_id)}')
 
                     certs[key_id] = cert
     return certs
@@ -844,16 +962,18 @@ def download_uk_certs() -> CertList:
     return certs
 
 DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
-    'AT': download_at_certs,
+    'AT':              download_at_certs,     # will be 'AT-greencheck' or just removed in future
+    'AT-NEW':          download_at_certs_new, # will be just 'AT' in future
+    'AT-TEST': lambda: download_at_certs_new(test=True),
     'CH': download_ch_certs,
     'DE': download_de_certs,
     'FR': download_fr_certs,
     'GB': download_uk_certs, # alias
     'NL': download_nl_certs,
     'NO': download_no_certs,
-    'SW': download_sw_certs,
+    'SE': download_se_certs,
     'UK': download_uk_certs,
-    'covid-pass-verifier': download_covid_pass_verifier_certs,
+    'COVID-PASS-VERIFIER': download_covid_pass_verifier_certs,
 }
 
 def download_ehc_certs(sources: List[str]) -> CertList:
@@ -1280,7 +1400,7 @@ def main() -> None:
     certs_ap.add_argument('--certs-from', metavar="LIST", help=
         "Download trust list from given country's trust list service. Comma separated list, entries from later country overwrites earlier.\n"
         "\n"
-        "Supported countries: AT, CH, DE, FR, NL, NO, SW, UK\n"
+        "Supported countries: AT, CH, DE, FR, NL, NO, SE, UK\n"
         "\n"
         "CH needs the environment variable CH_TOKEN set to a bearer token that can be found in the BIT's Android CovidCertificate app APK. See also: https://github.com/cn-uofbasel/ch-dcc-keys\n"
         "\n"
