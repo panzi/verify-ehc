@@ -273,9 +273,9 @@ def json_serial(obj: Any) -> str:
 def load_ehc_certs(filename: str) -> CertList:
     with open(filename, 'rb') as stream:
         certs_cbor = stream.read()
-    return load_ehc_certs_cbor(certs_cbor)
+    return load_ehc_certs_cbor(certs_cbor, filename)
 
-def load_ehc_certs_cbor(cbor_data: bytes) -> CertList:
+def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
     certs_data = cbor2.loads(cbor_data)
     certs: CertList = {}
     for item in certs_data['c']:
@@ -303,6 +303,9 @@ def load_ehc_certs_cbor(cbor_data: bytes) -> CertList:
                 pubkey_type = type(pubkey)
                 raise TypeError(f'unhandeled public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
+        if key_id in certs:
+            print_err(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
+
         certs[key_id] = cert
 
     return certs
@@ -321,7 +324,7 @@ def parse_json_relative_distinguished_name(name_dict: Dict[str, str]) -> Name:
 
     return Name(name_attrs)
 
-def load_hack_certs_json(data: bytes) -> CertList:
+def load_hack_certs_json(data: bytes, source: str) -> CertList:
     certs_dict = json.loads(data)
     certs: CertList = {}
 
@@ -351,6 +354,10 @@ def load_hack_certs_json(data: bytes) -> CertList:
 
             ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
             cert = HackCertificate(ec_pubkey, issuer, subject, not_valid_before, not_valid_after)
+
+            if key_id in certs:
+                print_err(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
+
             certs[key_id] = cert
 
         elif key_type == 'RSA':
@@ -361,10 +368,14 @@ def load_hack_certs_json(data: bytes) -> CertList:
 
             rsa_pubkey = RSAPublicNumbers(e, n).public_key()
             cert = HackCertificate(rsa_pubkey, issuer, subject, not_valid_before, not_valid_after)
+
+            if key_id in certs:
+                print_err(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
+
             certs[key_id] = cert
 
         else:
-            raise TypeError(f'illegal key type: {key_type!r}')
+            print_err(f'decoding {source} trust list: illegal key type: {key_type!r}')
 
     return certs
 
@@ -410,6 +421,9 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
             fingerprint = cert.fingerprint(hashes.SHA256())
             if key_id != fingerprint[0:8]:
                 raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+            if key_id in certs:
+                print_err(f'doubled key ID in DE trust list, only using last: {format_key_id(key_id)}')
 
             certs[key_id] = cert
 
@@ -490,7 +504,7 @@ def download_at_certs() -> CertList:
     else:
         print_err(f'root certificate for AT trust list not found!')
 
-    return load_ehc_certs_cbor(certs_cbor)
+    return load_ehc_certs_cbor(certs_cbor, 'AT')
 
 def download_de_certs() -> CertList:
     response = requests.get(CERTS_URL_DE, headers={'User-Agent': USER_AGENT})
@@ -534,6 +548,9 @@ def download_sw_certs() -> CertList:
                     if key_id != fingerprint[0:8]:
                         raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
+                if key_id in certs:
+                    print_err(f'doubled key ID in SW trust list, only using last: {format_key_id(key_id)}')
+
                     certs[key_id] = cert
     return certs
 
@@ -549,11 +566,14 @@ def download_covid_pass_verifier_certs() -> CertList:
             try:
                 cert = load_der_x509_certificate(cert_der)
             except Exception as error:
-                print_err(f'decoding covid-pass-verifier.com trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
+                print_err(f'decoding covid-pass-verifier.com trust list entry {format_key_id(key_id)}: {error}')
             else:
                 fingerprint = cert.fingerprint(hashes.SHA256())
                 if key_id != fingerprint[0:8]:
                     raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+                if key_id in certs:
+                    print_err(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
 
                 certs[key_id] = cert
         else:
@@ -580,6 +600,10 @@ def download_covid_pass_verifier_certs() -> CertList:
                 curve = SECP256R1()
                 ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
                 cert = HackCertificate(ec_pubkey, issuer, subject)
+
+                if key_id in certs:
+                    print_err(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
+
                 certs[key_id] = cert
 
             elif 'n' in pub and 'e' in pub:
@@ -590,10 +614,14 @@ def download_covid_pass_verifier_certs() -> CertList:
                 n = int.from_bytes(n_bytes, byteorder="big", signed=False)
                 rsa_pubkey = RSAPublicNumbers(e, n).public_key()
                 cert = HackCertificate(rsa_pubkey, issuer, subject)
+
+                if key_id in certs:
+                    print_err(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
+
                 certs[key_id] = cert
 
             else:
-                print_err(f'decoding covid-pass-verifier.com trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: no supported public key data found')
+                print_err(f'decoding covid-pass-verifier.com trust list entry {format_key_id(key_id)}: no supported public key data found')
     return certs
 
 def download_fr_certs(token: Optional[str] = None) -> CertList:
@@ -624,12 +652,19 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
             except ValueError:
                 cert = load_hack_certificate_from_der_public_key(cert_der)
                 # HackCertificate.fingerprint() is not implemented
+
+                if key_id in certs:
+                    print_err(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
+
                 certs[key_id] = cert
 
             else:
                 fingerprint = cert.fingerprint(hashes.SHA256())
                 if key_id != fingerprint[0:8]:
                     raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+                if key_id in certs:
+                    print_err(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
 
                 certs[key_id] = cert
 
@@ -663,6 +698,9 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
             except Exception as error:
                 print_err(f'decoding NL trust list entry {key_id.hex()} / {key_id_b64}: {error}')
             else:
+                if key_id in certs:
+                    print_err(f'doubled key ID in NL trust list, only using last: {format_key_id(key_id)}')
+
                 certs[key_id] = cert
     return certs
 
@@ -720,7 +758,6 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
                 curve = NIST_CURVES[crv]()
                 ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
                 cert = HackCertificate(ec_pubkey)
-                certs[key_id] = cert
 
             elif alg == 'RS256':
                 # RSA
@@ -730,10 +767,14 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
                 n = int.from_bytes(n_bytes, byteorder="big", signed=False)
                 rsa_pubkey = RSAPublicNumbers(e, n).public_key()
                 cert = HackCertificate(rsa_pubkey)
-                certs[key_id] = cert
 
             else:
-                print_err(f'decoding CH trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: algorithm not supported: {alg!r}')
+                print_err(f'decoding CH trust list entry {format_key_id(key_id)}: algorithm not supported: {alg!r}')
+
+            if key_id in certs:
+                print_err(f'doubled key ID in CH trust list, only using last: {format_key_id(key_id)}')
+
+            certs[key_id] = cert
 
     return certs
 
@@ -763,6 +804,9 @@ def download_no_certs(token: Optional[str] = None) -> CertList:
         pubkey_der = b64decode(entry['publicKey'])
 
         cert = load_hack_certificate_from_der_public_key(pubkey_der)
+        if key_id in certs:
+            print_err(f'doubled key ID in NO trust list, only using last: {format_key_id(key_id)}')
+
         certs[key_id] = cert
 
     return certs
@@ -792,6 +836,9 @@ def download_uk_certs() -> CertList:
             Name([NameAttribute(NameOID.COUNTRY_NAME, 'UK')]),
             Name([NameAttribute(NameOID.COUNTRY_NAME, 'UK')]),
         )
+        if key_id in certs:
+            print_err(f'doubled key ID in UK trust list, only using last: {format_key_id(key_id)}')
+
         certs[key_id] = cert
 
     return certs
@@ -1276,7 +1323,7 @@ def main() -> None:
             if args.certs_file.lower().endswith('.json'):
                 with open(args.certs_file, 'rb') as fp:
                     certs_data = fp.read()
-                certs = load_hack_certs_json(certs_data)
+                certs = load_hack_certs_json(certs_data, args.certs_file)
             else:
                 certs = load_ehc_certs(args.certs_file)
         else:
