@@ -674,7 +674,7 @@ def download_se_certs() -> CertList:
 
 def download_covid_pass_verifier_certs() -> CertList:
     certs: CertList = {}
-    response = requests.get(CERTS_URL_UK, headers={'User-Agent': USER_AGENT})
+    response = requests.get(CERTS_URL_COVID_PASS_VERIFIER, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
     certs_json = json.loads(response.content)
     for entry in certs_json:
