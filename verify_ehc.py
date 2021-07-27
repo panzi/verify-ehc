@@ -10,6 +10,7 @@ import os
 import argparse
 import codecs
 import hashlib
+import enum
 
 from os.path import splitext
 from datetime import date, datetime, timedelta, timezone
@@ -669,7 +670,8 @@ def download_se_certs() -> CertList:
                 if key_id in certs:
                     print_err(f'doubled key ID in SE trust list, only using last: {format_key_id(key_id)}')
 
-                    certs[key_id] = cert
+                certs[key_id] = cert
+
     return certs
 
 def download_covid_pass_verifier_certs() -> CertList:
@@ -922,6 +924,7 @@ def download_no_certs(token: Optional[str] = None) -> CertList:
         pubkey_der = b64decode(entry['publicKey'])
 
         cert = load_hack_certificate_from_der_public_key(pubkey_der)
+
         if key_id in certs:
             print_err(f'doubled key ID in NO trust list, only using last: {format_key_id(key_id)}')
 
@@ -976,16 +979,20 @@ DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'COVID-PASS-VERIFIER': download_covid_pass_verifier_certs,
 }
 
-def download_ehc_certs(sources: List[str]) -> CertList:
+def download_ehc_certs(sources: List[str], certs_table: Dict[str, CertList] = {}) -> CertList:
     certs: CertList = {}
     get_downloader = DOWNLOADERS.get
 
     for source in sources:
-        downloader = get_downloader(source)
-        if downloader is None:
-            raise ValueError(f'Unknown trust list source: {source}')
+        source_certs = certs_table.get(source)
+        if source_certs is not None:
+            certs.update(source_certs)
+        else:
+            downloader = get_downloader(source)
+            if downloader is None:
+                raise ValueError(f'Unknown trust list source: {source}')
 
-        certs.update(downloader())
+            certs.update(downloader())
 
     return certs
 
@@ -1390,6 +1397,46 @@ class SmartFormatter(argparse.HelpFormatter):
             lines.append(' '.join(line))
         return lines
 
+def parse_sources(sources_str: str) -> List[str]:
+    sources_str = sources_str.strip()
+    return [country.strip().upper() for country in sources_str.split(',')] if sources_str else []
+
+class Align(enum.Enum):
+    Left   = 0
+    Right  = 1
+    Center = 2
+
+    def align(self, text: str, width: int, fillchar: str = ' ') -> str:
+        if self == Align.Left:
+            return text.ljust(width, fillchar)
+
+        elif self == Align.Right:
+            return text.rjust(width, fillchar)
+
+        else:
+            return text.center(width, fillchar)
+
+def print_table(header: List[str], align: List[Align], body: List[List[str]]) -> None:
+    widths: List[int] = [len(cell) for cell in header]
+
+    for row in body:
+        for index, cell in enumerate(row):
+            cell_len = len(cell)
+            while index >= len(widths):
+                widths.append(0)
+
+            if widths[index] < cell_len:
+                widths[index] = cell_len
+
+    while len(align) < len(widths):
+        align.append(Align.Left)
+
+    print(' | '.join(alignment.align(cell, width) for alignment, cell, width in zip(align, header, widths)).rstrip())
+    print('-+-'.join(alignment.align('', width, '-') for alignment, width in zip(align, widths)))
+
+    for row in body:
+        print(' | '.join(alignment.align(cell, width) for alignment, cell, width in zip(align, row, widths)).rstrip())
+
 def main() -> None:
     ap = argparse.ArgumentParser(formatter_class=SmartFormatter, epilog=
         'Report issues to: https://github.com/panzi/verify-ehc/issues')
@@ -1412,6 +1459,8 @@ def main() -> None:
         "\n"
         "If neither --certs-file nor --certs-from is given then --certs-from=DE,AT is used as default.\n",
         default='DE,AT')
+    certs_ap.add_argument('--certs-table', metavar='LIST', help=
+        'Print table of trust list certificates comparing where which key ID is avaliable.')
 
     ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
 
@@ -1437,6 +1486,41 @@ def main() -> None:
         env = parse_env(env_str)
         os.environ.update(env)
 
+    certs_table: Dict[str, CertList] = {}
+    if args.certs_table:
+        sources = parse_sources(args.certs_table)
+        all_certs: CertList = {}
+        get_downloader = DOWNLOADERS.get
+
+        header: List[str] = ['Key ID']
+        align: List[Align] = [Align.Left]
+
+        for source in sources:
+            header.append(source)
+            align.append(Align.Center)
+            downloader = get_downloader(source)
+            if downloader is None:
+                raise ValueError(f'Unknown trust list source: {source}')
+
+            source_certs = downloader()
+            certs_table[source] = source_certs
+            all_certs.update(source_certs)
+
+        body: List[List[str]] = []
+        for key_id in sorted(all_certs):
+            row: List[str] = [b64encode(key_id).decode('ASCII')]
+            for source in sources:
+                cert = certs_table[source].get(key_id)
+                if cert is None:
+                    cell = ''
+                else:
+                    cell = ','.join(attr.value for attr in cert.subject.get_attributes_for_oid(NameOID.COUNTRY_NAME)) or 'X'
+
+                row.append(cell)
+            body.append(row)
+
+        print_table(header, align, body)
+
     certs: Optional[CertList] = None
     if not args.no_verify or args.save_certs or args.list_certs:
         if args.certs_file:
@@ -1447,9 +1531,7 @@ def main() -> None:
             else:
                 certs = load_ehc_certs(args.certs_file)
         else:
-            sources_str = args.certs_from.strip()
-            sources = [country.strip().upper() for country in sources_str.split(',')] if sources_str else []
-            certs = download_ehc_certs(sources)
+            certs = download_ehc_certs(parse_sources(args.certs_from), certs_table)
 
         if not certs:
             print_err("empty trust list!")
