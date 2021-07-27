@@ -1507,8 +1507,17 @@ def main() -> None:
             certs_table[source] = source_certs
             all_certs.update(source_certs)
 
+        def sort_key(key_id: bytes) -> Tuple[List[str], bytes]:
+            countries: List[str] = []
+            for source in sources:
+                cert = certs_table[source].get(key_id)
+                if cert is not None:
+                    for attr in cert.subject.get_attributes_for_oid(NameOID.COUNTRY_NAME):
+                        countries.append(attr.value)
+            return countries, key_id
+
         body: List[List[str]] = []
-        for key_id in sorted(all_certs):
+        for key_id in sorted(all_certs, key=sort_key):
             row: List[str] = [b64encode(key_id).decode('ASCII')]
             for source in sources:
                 cert = certs_table[source].get(key_id)
