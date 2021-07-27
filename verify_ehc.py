@@ -1453,7 +1453,7 @@ def main() -> None:
         "\n"
         "FR needs the environment variable FR_TOKEN set to a bearer token that can be found in the TousAntiCovid Verif app APK.\n"
         "\n"
-        "NO needs the environment variable NO_TOKEN set to a AuthorizationHeader string that can be found in the Kontroll av koronasertifikat app APK. See also: https://harrisonsand.com/posts/covid-certificates/\n"
+        "NO needs the environment variable NO_TOKEN set to an AuthorizationHeader string that can be found in the Kontroll av koronasertifikat app APK. See also: https://harrisonsand.com/posts/covid-certificates/\n"
         "\n"
         "Note that the GB trust list only contains GB public keys, so you might want to combine it with another.\n"
         "\n"

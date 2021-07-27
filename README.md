@@ -75,7 +75,7 @@ optional arguments:
                         bearer token that can be found in the TousAntiCovid
                         Verif app APK.
                         
-                        NO needs the environment variable NO_TOKEN set to a
+                        NO needs the environment variable NO_TOKEN set to an
                         AuthorizationHeader string that can be found in the
                         Kontroll av koronasertifikat app APK. See also:
                         https://harrisonsand.com/posts/covid-certificates/
