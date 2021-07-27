@@ -1460,7 +1460,8 @@ def main() -> None:
         "If neither --certs-file nor --certs-from is given then --certs-from=DE,AT is used as default.\n",
         default='DE,AT')
     certs_ap.add_argument('--certs-table', metavar='LIST', help=
-        'Print table of trust list certificates comparing where which key ID is avaliable.')
+        'Print table of trust list certificates showing where which key ID is avaliable showing the country of the certificate as it is known to the given trust list. '
+        '"X" means the certificate/public key is in the trust list, but no country attribute is known for it.')
 
     ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
 

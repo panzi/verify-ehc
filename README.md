@@ -46,7 +46,8 @@ Usage
 -----
 
 ```plain
-usage: verify_ehc.py [-h] [--certs-file FILE | --certs-from LIST]
+usage: verify_ehc.py [-h]
+                     [--certs-file FILE | --certs-from LIST | --certs-table LIST]
                      [--no-verify] [--list-certs] [--print-exts]
                      [--strip-revoked] [--save-certs FILE]
                      [--allow-public-key-only] [--image]
@@ -63,14 +64,14 @@ optional arguments:
                         service. Comma separated list, entries from later
                         country overwrites earlier.
                         
-                        Supported countries: AT, CH, DE, FR, NL, NO, SW, UK
+                        Supported countries: AT, CH, DE, FR, NL, NO, SE, UK
                         
                         CH needs the environment variable CH_TOKEN set to a
                         bearer token that can be found in the BIT's Android
                         CovidCertificate app APK. See also:
                         https://github.com/cn-uofbasel/ch-dcc-keys
                         
-                        FR needs the environment varialbe FR_TOKEN set to a
+                        FR needs the environment variable FR_TOKEN set to a
                         bearer token that can be found in the TousAntiCovid
                         Verif app APK.
                         
@@ -85,14 +86,18 @@ optional arguments:
                         If neither --certs-file nor --certs-from is given then
                         --certs-from=DE,AT is used as default.
                         
+  --certs-table LIST    Print table of trust list certificates showing where
+                        which key ID is avaliable showing the country of the
+                        certificate as it is known to the given trust list. "X"
+                        means the certificate/public key is in the trust list,
+                        but no country attribute is known for it.
   --no-verify           Skip certificate verification.
   --list-certs          List certificates from trust list.
   --print-exts          Also print certificate extensions.
   --strip-revoked       Strip revoked certificates. (Downloads certificate
                         revocation list, if supported by certificate.)
   --save-certs FILE     Store downloaded trust list to FILE. The filetype is
-                        derived from the extension, which can be .json or
-                        .cbor
+                        derived from the extension, which can be .json or .cbor
   --allow-public-key-only, --allow-pubkey-only
                         When writing the CBOR trust list format it usually
                         rejects entries that are only public keys and not full
