@@ -932,7 +932,7 @@ def download_no_certs(token: Optional[str] = None) -> CertList:
 
     return certs
 
-def download_uk_certs() -> CertList:
+def download_gb_certs() -> CertList:
     response = requests.get(CERTS_URL_UK, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
 
@@ -944,7 +944,7 @@ def download_uk_certs() -> CertList:
         expected_md5 = b64decode(md5_b64)
         actual_md5   = hashlib.md5(response.content).digest()
         if expected_md5 != actual_md5:
-            raise ValueError(f'MD5 sum missmatch of UK trust list: expected: {expected_md5.hex()}, actual: {actual_md5.hex()}')
+            raise ValueError(f'MD5 sum missmatch of GB trust list: expected: {expected_md5.hex()}, actual: {actual_md5.hex()}')
 
     certs_json = json.loads(response.content)
 
@@ -954,11 +954,11 @@ def download_uk_certs() -> CertList:
 
         cert = load_hack_certificate_from_der_public_key(
             pubkey_der,
-            Name([NameAttribute(NameOID.COUNTRY_NAME, 'UK')]),
-            Name([NameAttribute(NameOID.COUNTRY_NAME, 'UK')]),
+            Name([NameAttribute(NameOID.COUNTRY_NAME, 'GB')]),
+            Name([NameAttribute(NameOID.COUNTRY_NAME, 'GB')]),
         )
         if key_id in certs:
-            print_err(f'doubled key ID in UK trust list, only using last: {format_key_id(key_id)}')
+            print_err(f'doubled key ID in GB trust list, only using last: {format_key_id(key_id)}')
 
         certs[key_id] = cert
 
@@ -971,11 +971,11 @@ DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'CH': download_ch_certs,
     'DE': download_de_certs,
     'FR': download_fr_certs,
-    'GB': download_uk_certs, # alias
+    'GB': download_gb_certs,
     'NL': download_nl_certs,
     'NO': download_no_certs,
     'SE': download_se_certs,
-    'UK': download_uk_certs,
+    'UK': download_gb_certs, # alias
     'COVID-PASS-VERIFIER': download_covid_pass_verifier_certs,
 }
 
@@ -1447,7 +1447,7 @@ def main() -> None:
     certs_ap.add_argument('--certs-from', metavar="LIST", help=
         "Download trust list from given country's trust list service. Comma separated list, entries from later country overwrites earlier.\n"
         "\n"
-        "Supported countries: AT, CH, DE, FR, NL, NO, SE, UK\n"
+        "Supported countries: AT, CH, DE, FR, GB, NL, NO, SE\n"
         "\n"
         "CH needs the environment variable CH_TOKEN set to a bearer token that can be found in the BIT's Android CovidCertificate app APK. See also: https://github.com/cn-uofbasel/ch-dcc-keys\n"
         "\n"
@@ -1455,7 +1455,7 @@ def main() -> None:
         "\n"
         "NO needs the environment variable NO_TOKEN set to a AuthorizationHeader string that can be found in the Kontroll av koronasertifikat app APK. See also: https://harrisonsand.com/posts/covid-certificates/\n"
         "\n"
-        "Note that the UK trust list only contains UK public keys, so you might want to combine it with another.\n"
+        "Note that the GB trust list only contains GB public keys, so you might want to combine it with another.\n"
         "\n"
         "If neither --certs-file nor --certs-from is given then --certs-from=DE,AT is used as default.\n",
         default='DE,AT')
