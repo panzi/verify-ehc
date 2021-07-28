@@ -64,7 +64,7 @@ optional arguments:
                         service. Comma separated list, entries from later
                         country overwrites earlier.
                         
-                        Supported countries: AT, CH, DE, FR, NL, NO, SE, UK
+                        Supported countries: AT, CH, DE, FR, GB, NL, NO, SE
                         
                         CH needs the environment variable CH_TOKEN set to a
                         bearer token that can be found in the BIT's Android
@@ -80,7 +80,7 @@ optional arguments:
                         Kontroll av koronasertifikat app APK. See also:
                         https://harrisonsand.com/posts/covid-certificates/
                         
-                        Note that the UK trust list only contains UK public
+                        Note that the GB trust list only contains GB public
                         keys, so you might want to combine it with another.
                         
                         If neither --certs-file nor --certs-from is given then
