@@ -1002,7 +1002,6 @@ def load_jwt(token: bytes, root_cert: x509.Certificate) -> Dict[str, Any]:
     trustchain.append(root_cert)
 
     rsa_padding = PKCS1v15()
-    sig_alg = SignatureAlgorithmOID.RSA_WITH_SHA256
     for index in range(len(trustchain) - 1):
         signed_cert = trustchain[index]
         issuer_cert = trustchain[index + 1]
