@@ -856,7 +856,7 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
         token = os.getenv('CH_TOKEN')
         if token is None:
             raise KeyError(
-                "Required environment variable CH_TOKEN for FR trust list is not set. "
+                "Required environment variable CH_TOKEN for CH trust list is not set. "
                 "You can get the value of the token from the BIT's Android CovidCertificate application.")
 
     response = requests.get(ROOT_CERT_URL_CH, headers={
