@@ -51,6 +51,8 @@ from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 from PIL import Image # type: ignore
 
+import pkcs7_detached
+
 # based on: https://github.com/ehn-digital-green-development/ehn-sign-verify-python-trivial
 
 # Digital Green Certificate Gateway API SPEC: https://eu-digital-green-certificates.github.io/dgc-gateway/#/Trust%20Lists/downloadTrustList
@@ -808,7 +810,8 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
     cacert = None
     try:
         if response.status_code == 200:
-          cacert = load_der_x509_certificate(response.content)
+          _cacert = load_der_x509_certificate(response.content)
+          cacert = _cacert.public_bytes(ryptography.hazmat.primitives.serialization.Encoding.PEM)
     except:
         pass
 
@@ -817,13 +820,22 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
     response.raise_for_status()
     certs_json = json.loads(response.content)
 
-    payload   = b64decode(certs_json['payload'])
+    payload   = certs_json['payload']
 
     # Signature is a CMS (rfc5652) detached signature of the payload.
     # The certificate chain in this pkcs#7 signature rolls up to the
     # rootkey of the Kingdom of the Netherlands (https://www.pkioverheid.nl)
     #
-    signature = b64decode(certs_json['signature'])
+    signature = certs_json['signature']
+
+    if cacert:
+        if pkcs7_detached.verify_detached_signature(payload, signature, cacert) != True:
+            print_err("Signature on the trustfile of the Netherlands did not verify against the countries National PKI root")
+            exit(1)
+
+    # We've checked the signature - should be safe to decode now.
+    #
+    payload = b64decode(payload)
 
     payload_dict = json.loads(payload)
     #
