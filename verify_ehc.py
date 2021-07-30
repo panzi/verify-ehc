@@ -49,6 +49,7 @@ from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey,
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
+
 from PIL import Image # type: ignore
 
 import pkcs7_detached
@@ -812,8 +813,9 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
     try:
         if response.status_code == 200:
           _cacert = load_der_x509_certificate(response.content)
-          cacert = _cacert.public_bytes(ryptography.hazmat.primitives.serialization.Encoding.PEM)
-    except:
+          cacert = _cacert.public_bytes(Encoding.PEM).decode()
+    except Exception as error:
+        print(f'WARNING: NL PKI root for validation failed to load. Not validating: {error}', file=sys.stderr)
         pass
 
     certs: CertList = {}
@@ -821,7 +823,7 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
     response.raise_for_status()
     certs_json = json.loads(response.content)
 
-    payload   = certs_json['payload']
+    payload   = b64decode(certs_json['payload'])
 
     # Signature is a CMS (rfc5652) detached signature of the payload.
     # The certificate chain in this pkcs#7 signature rolls up to the
@@ -830,13 +832,9 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
     signature = certs_json['signature']
 
     if cacert:
-        if pkcs7_detached.verify_detached_signature(payload, signature, cacert) != True:
+        if pkcs7_detached.verify_detached_signature(payload.decode(), signature, cacert) != True:
             print_err("Signature on the trustfile of the Netherlands did not verify against the countries National PKI root")
             exit(1)
-
-    # We've checked the signature - should be safe to decode now.
-    #
-    payload = b64decode(payload)
 
     payload_dict = json.loads(payload)
     #
