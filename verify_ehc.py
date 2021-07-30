@@ -180,6 +180,7 @@ PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/
 # Netherlands public keys:
 # (https://www.npkd.nl/csca-health.html)
 # https://verifier-api.<acc/test/etc>.coronacheck.nl/v4/verifier/public_keys
+
 # json containing a CMS (rfc5652) signature and a payload. Both base64 encoded.
 # The payload is a json dictionary of the domestic and international keys. The
 # later is an dictionary with the KID as a base64 encoded key and a subkjectPK
