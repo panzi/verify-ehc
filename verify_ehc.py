@@ -1110,6 +1110,7 @@ def decode_ehc(b45_data: str) -> CoseMessage:
     try:
         data = b45decode(b45_data)
     except ValueError:
+        print(b45_data)
         raise ValueError(f'Invalid base45 string. Try with single quotes.') from None
 
     if data.startswith(b'x'):
