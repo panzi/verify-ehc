@@ -35,6 +35,9 @@ from cose.keys.keyparam import KpAlg, EC2KpX, EC2KpY, EC2KpCurve, KpKty, RSAKpN,
 from cose.keys.keytype import KtyEC2, KtyRSA
 from cose.messages import CoseMessage, Sign1Message # type: ignore
 from cose.algorithms import Ps256, Es256
+
+from OpenSSL import crypto
+
 from cryptography import x509
 from cryptography.x509 import load_der_x509_certificate, load_pem_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, RelativeDistinguishedName, NameAttribute, Version, Extensions
 from cryptography.x509.extensions import ExtensionNotFound
@@ -48,7 +51,6 @@ from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey,
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
-from pyzbar.pyzbar import decode as decode_qrcode # type: ignore
 from PIL import Image # type: ignore
 
 # based on: https://github.com/ehn-digital-green-development/ehn-sign-verify-python-trivial
@@ -178,8 +180,16 @@ PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/
 # Netherlands public keys:
 # (https://www.npkd.nl/csca-health.html)
 # https://verifier-api.<acc/test/etc>.coronacheck.nl/v4/verifier/public_keys
+# json containing a CMS (rfc5652) signature and a payload. Both base64 encoded.
+# The payload is a json dictionary of the domestic and international keys. The
+# later is an dictionary with the KID as a base64 encoded key and a subkjectPK
+# and keyUsage array with the allowed use. Typical decode is:
+# curl https://verifier-api.acc.coronacheck.nl/v4/verifier/public_keys |\
+#    jq -r .payload  |\
+#    base64 -d |\
+#    jq .eu_keys
 CERTS_URL_NL = 'https://verifier-api.acc.coronacheck.nl/v4/verifier/public_keys'
-# JSON containing base64 containing JSON containing base64 containing XML!
+ROOT_URL_NL = 'http://cert.pkioverheid.nl/RootCA-G3.cer'
 
 # Keys from a French validation app (nothing official, just a hobby project by someone):
 # https://github.com/lovasoa/sanipasse/blob/master/src/assets/Digital_Green_Certificate_Signing_Keys.json
@@ -794,18 +804,35 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
     return certs
 
 def download_nl_certs(token: Optional[str] = None) -> CertList:
+    # Fetch the root certificate for the Netherlands; used to secure the
+    # trust list. Non fatal error if this fails.
+    response = requests.get(ROOT_URL_NL, headers={'User-Agent': USER_AGENT})
+    cacert = None
+    try:
+        if response.status_code == 200:
+          cacert = load_der_x509_certificate(response.content)
+    except:
+        pass
+
     certs: CertList = {}
     response = requests.get(CERTS_URL_NL, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
     certs_json = json.loads(response.content)
 
-    # TODO: find out how to verify signature?
     payload   = b64decode(certs_json['payload'])
+
+    # Signature is a CMS (rfc5652) detached signature of the payload.
+    # The certificate chain in this pkcs#7 signature rolls up to the
+    # rootkey of the Kingdom of the Netherlands (https://www.pkioverheid.nl)
+    #
     signature = b64decode(certs_json['signature'])
 
     payload_dict = json.loads(payload)
-    # TODO: Don't know what to do with payload_dict['nl_keys'][*]['public_key']
-    #       Its some strange XML (encoded as base64)
+    #
+    # We ignore the 'nl_keys'] - these are for the domestic QR codes; which are
+    # privacy preserving C.L. signature based to allow for unlinkability as to
+    # prevent tracking/surveilance.
+    #
     for key_id_b64, pubkeys in payload_dict['eu_keys'].items():
         key_id = b64decode(key_id_b64)
 
