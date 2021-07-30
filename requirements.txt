@@ -10,3 +10,5 @@ pillow
 python-jose[cryptography]
 jwcrypto
 python-dateutil
+lxml
+pkcs7-detached
