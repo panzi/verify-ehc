@@ -186,7 +186,7 @@ PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/
 #    jq -r .payload  |\
 #    base64 -d |\
 #    jq .eu_keys
-CERTS_URL_NL = 'https://verifier-api.acc.coronacheck.nl/v4/verifier/public_keys'
+CERTS_URL_NL = 'https://verifier-api.coronacheck.nl/v4/verifier/public_keys'
 ROOT_URL_NL = 'http://cert.pkioverheid.nl/RootCA-G3.cer'
 
 # Keys from a French validation app (nothing official, just a hobby project by someone):
@@ -1110,6 +1110,7 @@ def decode_ehc(b45_data: str) -> CoseMessage:
     try:
         data = b45decode(b45_data)
     except ValueError:
+        print(b45_data)
         raise ValueError(f'Invalid base45 string. Try with single quotes.') from None
 
     if data.startswith(b'x'):
