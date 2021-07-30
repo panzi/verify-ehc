@@ -178,7 +178,7 @@ PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/
 # Netherlands public keys:
 # (https://www.npkd.nl/csca-health.html)
 # https://verifier-api.<acc/test/etc>.coronacheck.nl/v4/verifier/public_keys
-CERTS_URL_NL = 'https://verifier-api.acc.coronacheck.nl/v4/verifier/public_keys'
+CERTS_URL_NL = 'https://verifier-api.coronacheck.nl/v4/verifier/public_keys'
 # JSON containing base64 containing JSON containing base64 containing XML!
 
 # Keys from a French validation app (nothing official, just a hobby project by someone):
