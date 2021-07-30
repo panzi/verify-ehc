@@ -36,8 +36,6 @@ from cose.keys.keytype import KtyEC2, KtyRSA
 from cose.messages import CoseMessage, Sign1Message # type: ignore
 from cose.algorithms import Ps256, Es256
 
-from OpenSSL import crypto
-
 from cryptography import x509
 from cryptography.x509 import load_der_x509_certificate, load_pem_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, RelativeDistinguishedName, NameAttribute, Version, Extensions
 from cryptography.x509.extensions import ExtensionNotFound
