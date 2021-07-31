@@ -27,6 +27,8 @@ from lxml.html import fromstring as parse_html # type: ignore
 from dateutil.parser import isoparse as parse_datetime
 from jose import jwt, jws, jwk # type: ignore
 from base45 import b45decode # type: ignore
+from requests.exceptions import BaseHTTPError # type: ignore
+
 from cose.headers import KID, Algorithm # type: ignore
 from cose.keys import CoseKey
 from cose.keys.curves import CoseCurve, P256, P384, P521
@@ -137,7 +139,7 @@ CERTS_URL_AT_TEST = 'https://dgc-trusttest.qr.gv.at/trustlist'
 SIGN_URL_AT_TEST  = 'https://dgc-trusttest.qr.gv.at/trustlistsig'
 
 # These root certs are copied from some presentation slides.
-# TODO: Link a proper source here once it becomes available.
+# TODO: Link a proper source here once it becomes available?
 #
 # TODO: keep up to date
 # Not Before: Jun  2 13:46:21 2021 GMT
@@ -578,16 +580,13 @@ def download_at_certs_new(test: bool = False, token: Optional[str] = None) -> Ce
     #            'Information about how to get a token will follow soon.')
 
     if test:
-        certs_url     = CERTS_URL_AT_TEST
-        sign_url      = SIGN_URL_AT_TEST
-        root_cert_pem = ROOT_CERT_AT_TEST
+        certs_url = CERTS_URL_AT_TEST
+        sign_url  = SIGN_URL_AT_TEST
+        root_cert = get_root_cert('AT-TEST')
     else:
-        certs_url     = CERTS_URL_AT_PROD
-        sign_url      = SIGN_URL_AT_PROD
-        root_cert_pem = ROOT_CERT_AT_PROD
-
-    # TODO: Maybe look if there is a revocation list URL in root_cert.extensions?
-    root_cert = load_pem_x509_certificate(root_cert_pem)
+        certs_url = CERTS_URL_AT_PROD
+        sign_url  = SIGN_URL_AT_PROD
+        root_cert = get_root_cert('AT-NEW')
 
     response = requests.get(certs_url, headers={'User-Agent': USER_AGENT})
     #response = requests.get(certs_url, headers={
@@ -648,27 +647,17 @@ def download_de_certs() -> CertList:
     certs_signed_json = response.content
 
     pubkey: Optional[EllipticCurvePublicKey] = None
-    response = requests.get(PUBKEY_URL_DE, headers={'User-Agent': USER_AGENT})
-    if response.status_code == 404:
-        print_err(f'{PUBKEY_URL_DE} root certificate for DE trust list not found (404)!')
-    else:
-        response.raise_for_status()
-        res_pubkey = load_pem_public_key(response.content)
-
-        if not isinstance(res_pubkey, EllipticCurvePublicKey):
-            pubkey_type = type(res_pubkey)
-            print_err(f'{PUBKEY_URL_DE} is expected to be an EllipticCurvePublicKey but actually is {pubkey_type.__module__}.{pubkey_type.__name__}')
-        else:
-            pubkey = res_pubkey
+    try:
+        pubkey = get_root_cert('DE').public_key() # type: ignore
+    except (BaseHTTPError, ValueError) as error:
+        print_err(f'DE trust list error (NOT VALIDATING): {error}')
 
     return load_de_trust_list(certs_signed_json, pubkey)
 
 def download_se_certs() -> CertList:
     certs: CertList = {}
-    # TODO: don't crash when root cert not available
-    response = requests.get(ROOT_CERT_URL_SE, headers={'User-Agent': USER_AGENT})
-    response.raise_for_status()
-    root_cert = load_pem_x509_certificate(response.content)
+    # TODO: don't crash when root cert is not available
+    root_cert = get_root_cert('SE')
 
     response = requests.get(CERTS_URL_SE, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
@@ -839,6 +828,7 @@ def verify_pkcs7_detached_signature(document: bytes, signature: bytes, certifica
     content = backend._bytes_to_bio(document) # pylint: disable=W0212
 
     # If PKCS7_NOVERIFY is set the signer's certificates are not chain verified.
+    # TODO: This is not good, but how to do it correctly?
     flags = lib.PKCS7_NOVERIFY
 
     # https://www.openssl.org/docs/man1.0.2/crypto/PKCS7_verify.html
@@ -848,16 +838,10 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
     # Fetch the root certificate for the Netherlands; used to secure the
     # trust list. Non fatal error if this fails.
     root_cert: Optional[x509.Certificate] = None
-
-    response = requests.get(ROOT_CERT_URL_NL, headers={'User-Agent': USER_AGENT})
-    status_code = response.status_code
-    if status_code < 200 or status_code >= 300:
-        print_err(f'{ROOT_CERT_URL_NL} {status_code} {http.client.responses.get(status_code, "")}')
-    else:
-        try:
-            root_cert = load_der_x509_certificate(response.content)
-        except Exception as error:
-            print_warn(f'NL PKI root for validation failed to load. Not validating: {error}')
+    try:
+        root_cert = get_root_cert('NL')
+    except (BaseHTTPError, ValueError) as error:
+        print_err(f'NL trust list error (NOT VALIDATING): {error}')
 
     certs: CertList = {}
     response = requests.get(CERTS_URL_NL, headers={'User-Agent': USER_AGENT})
@@ -876,7 +860,7 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
         raise ValueError("Signature on the trustfile of the Netherlands (NL) did not verify against the countries National PKI root")
 
     payload_dict = json.loads(payload)
-    #
+
     # We ignore the 'nl_keys' - these are for the domestic QR codes; which are
     # privacy preserving C.L. signature based to allow for unlinkability as to
     # prevent tracking/surveilance.
@@ -899,24 +883,21 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
                 certs[key_id] = cert
     return certs
 
-def download_ch_certs(token: Optional[str] = None) -> CertList:
-    CH_USER_AGENT = 'ch.admin.bag.covidcertificate.wallet;2.1.1;1626211804080;Android;28'
+CH_USER_AGENT = 'ch.admin.bag.covidcertificate.wallet;2.1.1;1626211804080;Android;28'
 
+def get_ch_token() -> str:
+    token = os.getenv('CH_TOKEN')
     if token is None:
-        token = os.getenv('CH_TOKEN')
-        if token is None:
-            raise KeyError(
-                "Required environment variable CH_TOKEN for CH trust list is not set. "
-                "You can get the value of the token from the BIT's Android CovidCertificate application.")
+        raise KeyError(
+            "Required environment variable CH_TOKEN for CH trust list is not set. "
+            "You can get the value of the token from the BIT's Android CovidCertificate application.")
+    return token
 
-    response = requests.get(ROOT_CERT_URL_CH, headers={
-        'User-Agent': CH_USER_AGENT,
-        'Accept': 'application/json+jws',
-        'Accept-Encoding': 'gzip',
-        'Authorization': f'Bearer {token}',
-    })
-    response.raise_for_status()
-    root_cert = load_pem_x509_certificate(response.content)
+def download_ch_certs(token: Optional[str] = None) -> CertList:
+    if token is None:
+        token = get_ch_token()
+
+    root_cert = get_root_cert('CH')
 
     response = requests.get(CERTS_URL_CH, headers={
         'User-Agent': CH_USER_AGENT,
@@ -1070,6 +1051,119 @@ def download_ehc_certs(sources: List[str], certs_table: Dict[str, CertList] = {}
             certs.update(downloader())
 
     return certs
+
+def get_at_new_root_cert() -> x509.Certificate:
+    return load_pem_x509_certificate(ROOT_CERT_AT_PROD)
+
+def get_at_test_root_cert() -> x509.Certificate:
+    return load_pem_x509_certificate(ROOT_CERT_AT_TEST)
+
+def get_de_root_pubkey() -> EllipticCurvePublicKey:
+    response = requests.get(PUBKEY_URL_DE, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+    pubkey = load_pem_public_key(response.content)
+
+    if not isinstance(pubkey, EllipticCurvePublicKey):
+        pubkey_type = type(pubkey)
+        raise ValueError(f'{PUBKEY_URL_DE} is expected to be an EllipticCurvePublicKey but actually is {pubkey_type.__module__}.{pubkey_type.__name__}')
+
+    return pubkey
+
+def get_de_root_cert() -> x509.Certificate:
+    return HackCertificate(get_de_root_pubkey())
+
+def get_nl_root_cert() -> x509.Certificate:
+    response = requests.get(ROOT_CERT_URL_NL, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+    return load_der_x509_certificate(response.content)
+
+def get_se_root_cert() -> x509.Certificate:
+    response = requests.get(ROOT_CERT_URL_SE, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+    return load_pem_x509_certificate(response.content)
+
+def get_ch_root_cert(token: Optional[str] = None) -> x509.Certificate:
+    if token is None:
+        token = get_ch_token()
+
+    response = requests.get(ROOT_CERT_URL_CH, headers={
+        'User-Agent': CH_USER_AGENT,
+        'Accept': 'application/json+jws',
+        'Accept-Encoding': 'gzip',
+        'Authorization': f'Bearer {token}',
+    })
+    response.raise_for_status()
+
+    return load_pem_x509_certificate(response.content)
+
+ROOT_CERT_DOWNLOADERS: Dict[str, Callable[[], x509.Certificate]] = {
+    'AT-NEW':  get_at_new_root_cert,
+    'AT-TEST': get_at_test_root_cert,
+    'DE':      get_de_root_cert, # actuall just pub key
+    'NL':      get_nl_root_cert,
+    'SE':      get_se_root_cert,
+    'CH':      get_ch_root_cert,
+}
+
+def get_root_cert(source: str) -> x509.Certificate:
+    envvar = f'{source.replace("-", "_")}_ROOT_CERT'
+    value = os.getenv(envvar)
+    if value is None:
+        return ROOT_CERT_DOWNLOADERS[source]()
+
+    if value.startswith('-----BEGIN CERTIFICATE-----'):
+        return load_pem_x509_certificate(value.encode())
+    elif value.startswith('-----BEGIN PUBLIC KEY-----'):
+        pubkey = load_pem_public_key(value.encode())
+
+        if not isinstance(pubkey, (EllipticCurvePublicKey, RSAPublicKey)):
+            pubkey_type = type(pubkey)
+            raise ValueError(f'expected EllipticCurvePublicKey or RSAPublicKey but actually got {pubkey_type.__module__}.{pubkey_type.__name__}')
+
+        return HackCertificate(pubkey)
+
+    with open(value, "rb") as fp:
+        data = fp.read()
+
+    if data.startswith(b'-----BEGIN CERTIFICATE-----'):
+        return load_pem_x509_certificate(data)
+    elif data.startswith(b'-----BEGIN PUBLIC KEY-----'):
+        pubkey = load_pem_public_key(data)
+
+        if not isinstance(pubkey, (EllipticCurvePublicKey, RSAPublicKey)):
+            pubkey_type = type(pubkey)
+            raise ValueError(f'expected EllipticCurvePublicKey or RSAPublicKey but actually got {pubkey_type.__module__}.{pubkey_type.__name__}')
+
+        return HackCertificate(pubkey)
+    else:
+        return load_der_x509_certificate(data)
+
+def get_default_root_cert_filename(source: str) -> str:
+    envvar = f'{source.replace("-", "_")}_ROOT_CERT'
+    value = os.getenv(envvar)
+    if value is not None and \
+            not value.startswith('-----BEGIN CERTIFICATE-----') and \
+            not value.startswith('-----BEGIN PUBLIC KEY-----'):
+        return value
+
+    return f'{source}.pem'
+
+def save_cert(cert: x509.Certificate, filename: str) -> None:
+    _, ext = splitext(filename)
+    ext = ext.lower()
+
+    if ext == '.pem':
+        encoding = Encoding.PEM
+    else:
+        encoding = Encoding.DER
+
+    try:
+        data = cert.public_bytes(encoding)
+    except NotImplementedError:
+        data = cert.public_key().public_bytes(encoding, PublicFormat.SubjectPublicKeyInfo)
+
+    with open(filename, 'wb') as fp:
+        fp.write(data)
 
 def load_jwt(token: bytes, root_cert: x509.Certificate, options: Optional[Dict[str, bool]] = None) -> Dict[str, Any]:
     header = jws.get_unverified_header(token)
@@ -1544,23 +1638,56 @@ def main() -> None:
     ap.add_argument('--print-exts', action='store_true', help='Also print certificate extensions.')
     ap.add_argument('--strip-revoked', action='store_true', help='Strip revoked certificates. (Downloads certificate revocation list, if supported by certificate.)')
     ap.add_argument('--save-certs', metavar='FILE', action='append', help='Store downloaded trust list to FILE. The filetype is derived from the extension, which can be .json or .cbor')
+    ap.add_argument('--download-root-cert', metavar='SOURCE[@FILENAME]', action='append', help=
+        'Download and store root certificate (or public key) of SOURCE as FILENAME. '
+        'If FILENAME is not given SOURCE.pem is used. '
+        'If FILENAME ends in ".pem" the certificate (or public key) is stored encoded as PEM, otherwise it is encoded as DER.')
+    ap.add_argument('--download-all-root-certs', action='store_true', help=
+        'Download and store all root certificates (or public keys) and store them in SOURCE.pem files.')
     ap.add_argument('--allow-public-key-only', '--allow-pubkey-only', action='store_true', help=
         'When writing the CBOR trust list format it usually rejects entries that are only public keys and not full x509 certificates. '
         'With this options it also writes entries that are only public keys.')
+    ap.add_argument('--envfile', metavar='FILE', default='.env', help=
+        'Load environment variables from FILE. Default is ".env". '
+        'Set this to an empty string to not load environment varibles from a file.')
 
     ap.add_argument('--image', action='store_true', default=False, help='ehc_code is a path to an image file containing a QR-code.')
     ap.add_argument('ehc_code', nargs='*', help='Scanned EHC QR-code, or when --image is passed path to an image file.')
 
     args = ap.parse_args()
 
-    try:
-        with open('.env', 'r') as text_stream:
-            env_str = text_stream.read()
-    except (FileNotFoundError, IsADirectoryError):
-        pass
-    else:
-        env = parse_env(env_str)
-        os.environ.update(env)
+    if args.envfile:
+        try:
+            with open(args.envfile, 'r') as text_stream:
+                env_str = text_stream.read()
+        except (FileNotFoundError, IsADirectoryError):
+            pass
+        else:
+            env = parse_env(env_str)
+            os.environ.update(env)
+
+    download_root_certs = args.download_root_cert or []
+    if args.download_all_root_certs:
+        download_root_certs.extend(ROOT_CERT_DOWNLOADERS.keys())
+
+    for download_root_cert in download_root_certs:
+        parts = download_root_cert.split('@', 1)
+        source = parts[0]
+        if len(parts) > 1:
+            filename = parts[1]
+        else:
+            filename = get_default_root_cert_filename(source)
+
+        source_upper = source.strip().upper()
+        root_cert_downloader = ROOT_CERT_DOWNLOADERS.get(source_upper)
+        if root_cert_downloader is None:
+            if source_upper in DOWNLOADERS:
+                raise KeyError(f'{source_upper} has no known root certificate')
+            else:
+                raise KeyError(f'Unknown trust list source: {source}')
+        root_cert = root_cert_downloader()
+
+        save_cert(root_cert, filename)
 
     certs_table: Dict[str, CertList] = {}
     if args.certs_table:

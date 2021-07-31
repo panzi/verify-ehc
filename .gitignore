@@ -3,3 +3,6 @@ __pycache__
 *.cbor
 *.json
 *.jwt
+*.pem
+*.crt
+/tmp
