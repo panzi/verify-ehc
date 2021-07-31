@@ -822,10 +822,14 @@ def verify_pkcs7_detached_signature(document: bytes, signature: bytes, certifica
 
     # Create the pkcs7 object
     pkcs7_object = lib.d2i_PKCS7_bio(bio.bio, ffi.NULL)
+    if pkcs7_object == ffi.NULL:
+        binding._consume_errors(lib)
+        raise ValueError("Unable to parse PKCS7 data")
 
     # Load the specified certificate
     stack = lib.sk_X509_new_null()
-    lib.sk_X509_push(stack, certificate._x509) # type: ignore
+    res = lib.sk_X509_push(stack, certificate._x509) # type: ignore
+    binding._openssl_assert(lib, res >= 1)
 
     # We need a CA store, even though we don't use it
     store = lib.X509_STORE_new()
