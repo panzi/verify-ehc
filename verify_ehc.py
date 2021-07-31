@@ -200,6 +200,8 @@ CERTS_URL_FR = 'https://portail.tacv.myservices-ingroupe.com/api/client/configur
 
 # Sweden (JOSE encoded):
 CERTS_URL_SE = 'https://dgcg.covidbevis.se/tp/trust-list'
+ROOT_CERT_URL_SE = 'https://dgcg.covidbevis.se/tp/cert'
+# See: https://github.com/DIGGSweden/dgc-trust/blob/main/specifications/trust-list.md
 
 # United Kingdom trust list:
 CERTS_URL_UK = 'https://covid-status.service.nhsx.nhs.uk/pubkeys/keys.json'
@@ -664,8 +666,17 @@ def download_de_certs() -> CertList:
 def download_se_certs() -> CertList:
     certs: CertList = {}
     # TODO: find out how to verify signature?
+    # TODO: don't crash when root cert not available
+    #response = requests.get(ROOT_CERT_URL_SE, headers={'User-Agent': USER_AGENT})
+    #response.raise_for_status()
+    #root_cert = load_pem_x509_certificate(response.content)
+
     response = requests.get(CERTS_URL_SE, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
+
+    # TODO: jose.exceptions.JWTClaimsError: Invalid claim format in token
+    #payload = load_jwt(response.content, root_cert)
+
     token_str = response.content.decode(response.encoding)
     token = jwt.get_unverified_claims(token_str)
 
@@ -1083,7 +1094,7 @@ def load_jwt(token: bytes, root_cert: x509.Certificate) -> Dict[str, Any]:
             pubkey.verify(
                 signed_cert.signature,
                 signed_cert.tbs_certificate_bytes,
-                signed_cert.signature_hash_algorithm # type: ignore
+                ECDSA(signed_cert.signature_hash_algorithm),
             )
         else:
             pubkey_type = type(pubkey)
@@ -1108,7 +1119,7 @@ def load_jwt(token: bytes, root_cert: x509.Certificate) -> Dict[str, Any]:
         y = ec_pn.y.to_bytes(size, byteorder="big")
         sigkey = jwk.construct({
             'kty': 'EC',
-            'alg': 'EC256',
+            'alg': 'ES256',
             'crv': SECG_TO_NIST_CURVES.get(pubkey.curve.name, pubkey.curve.name),
             'x': b64encode(x),
             'y': b64encode(y),
