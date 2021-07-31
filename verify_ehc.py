@@ -665,20 +665,15 @@ def download_de_certs() -> CertList:
 
 def download_se_certs() -> CertList:
     certs: CertList = {}
-    # TODO: find out how to verify signature?
     # TODO: don't crash when root cert not available
-    #response = requests.get(ROOT_CERT_URL_SE, headers={'User-Agent': USER_AGENT})
-    #response.raise_for_status()
-    #root_cert = load_pem_x509_certificate(response.content)
+    response = requests.get(ROOT_CERT_URL_SE, headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+    root_cert = load_pem_x509_certificate(response.content)
 
     response = requests.get(CERTS_URL_SE, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
 
-    # TODO: jose.exceptions.JWTClaimsError: Invalid claim format in token
-    #payload = load_jwt(response.content, root_cert)
-
-    token_str = response.content.decode(response.encoding)
-    token = jwt.get_unverified_claims(token_str)
+    token = load_jwt(response.content, root_cert, {'verify_aud': False})
 
     for country, country_keys in token['dsc_trust_list'].items():
         for entry in country_keys['keys']:
@@ -1072,7 +1067,7 @@ def download_ehc_certs(sources: List[str], certs_table: Dict[str, CertList] = {}
 
     return certs
 
-def load_jwt(token: bytes, root_cert: x509.Certificate) -> Dict[str, Any]:
+def load_jwt(token: bytes, root_cert: x509.Certificate, options: Optional[Dict[str, bool]] = None) -> Dict[str, Any]:
     header = jws.get_unverified_header(token)
     trustchain = [x509.load_der_x509_certificate(b64decode(cert_b64)) for cert_b64 in header['x5c']]
     trustchain.append(root_cert)
@@ -1128,7 +1123,7 @@ def load_jwt(token: bytes, root_cert: x509.Certificate) -> Dict[str, Any]:
         pubkey_type = type(pubkey)
         raise ValueError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
-    return jwt.decode(token, key=sigkey)
+    return jwt.decode(token, key=sigkey, options=options)
 
 def load_hack_certificate_from_der_public_key(data: bytes,
     issuer:  Optional[Name] = None,
