@@ -49,10 +49,9 @@ from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey,
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
-
-from PIL import Image # type: ignore
-
-import pkcs7_detached
+from cryptography.hazmat.bindings.openssl import binding
+from cryptography.hazmat.backends.openssl.backend import backend # type: ignore
+from cryptography.hazmat.bindings._openssl import ffi, lib # type: ignore
 
 # based on: https://github.com/ehn-digital-green-development/ehn-sign-verify-python-trivial
 
@@ -189,8 +188,8 @@ PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/
 #    jq -r .payload  |\
 #    base64 -d |\
 #    jq .eu_keys
-CERTS_URL_NL = 'https://verifier-api.coronacheck.nl/v4/verifier/public_keys'
-ROOT_URL_NL = 'http://cert.pkioverheid.nl/RootCA-G3.cer'
+CERTS_URL_NL     = 'https://verifier-api.coronacheck.nl/v4/verifier/public_keys'
+ROOT_CERT_URL_NL = 'http://cert.pkioverheid.nl/RootCA-G3.cer'
 
 # Keys from a French validation app (nothing official, just a hobby project by someone):
 # https://github.com/lovasoa/sanipasse/blob/master/src/assets/Digital_Green_Certificate_Signing_Keys.json
@@ -438,6 +437,11 @@ def print_err(msg: str) -> None:
     # so that errors and normal output is correctly interleaved:
     sys.stdout.flush()
     print(f'ERROR: {msg}', file=sys.stderr)
+
+def print_warn(msg: str) -> None:
+    # so that errors and normal output is correctly interleaved:
+    sys.stdout.flush()
+    print(f'WARNING: {msg}', file=sys.stderr)
 
 def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = None) -> CertList:
     certs: CertList = {}
@@ -804,40 +808,66 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
 
     return certs
 
+# from pkcs7_detached, except no need to re-encode and re-decode everything
+# see: https://github.com/jnewbigin/pkcs7_detached/blob/master/pkcs7_detached/__init__.py
+def verify_pkcs7_detached_signature(document: bytes, signature: bytes, certificate: x509.Certificate) -> bool:
+    # Load the string into a bio
+    bio = backend._bytes_to_bio(signature) # pylint: disable=W0212
+
+    # Create the pkcs7 object
+    pkcs7_object = lib.d2i_PKCS7_bio(bio.bio, ffi.NULL)
+
+    # Load the specified certificate
+    stack = lib.sk_X509_new_null()
+    lib.sk_X509_push(stack, certificate._x509) # type: ignore
+
+    # We need a CA store, even though we don't use it
+    store = lib.X509_STORE_new()
+    binding._openssl_assert(lib, store != ffi.NULL)
+
+    # Load the document into a bio
+    content = backend._bytes_to_bio(document) # pylint: disable=W0212
+
+    # If PKCS7_NOVERIFY is set the signer's certificates are not chain verified.
+    flags = lib.PKCS7_NOVERIFY
+
+    # https://www.openssl.org/docs/man1.0.2/crypto/PKCS7_verify.html
+    return lib.PKCS7_verify(pkcs7_object, stack, store, content.bio, ffi.NULL, flags) == 1
+
 def download_nl_certs(token: Optional[str] = None) -> CertList:
     # Fetch the root certificate for the Netherlands; used to secure the
     # trust list. Non fatal error if this fails.
-    response = requests.get(ROOT_URL_NL, headers={'User-Agent': USER_AGENT})
-    cacert = None
-    try:
-        if response.status_code == 200:
-          _cacert = load_der_x509_certificate(response.content)
-          cacert = _cacert.public_bytes(Encoding.PEM).decode()
-    except Exception as error:
-        print(f'WARNING: NL PKI root for validation failed to load. Not validating: {error}', file=sys.stderr)
-        pass
+    root_cert: Optional[x509.Certificate] = None
+
+    response = requests.get(ROOT_CERT_URL_NL, headers={'User-Agent': USER_AGENT})
+    status_code = response.status_code
+    if status_code < 200 or status_code >= 300:
+        print_err(f'{ROOT_CERT_URL_NL} {status_code} {http.client.responses.get(status_code, "")}')
+    else:
+        try:
+            root_cert = load_der_x509_certificate(response.content)
+        except Exception as error:
+            print_warn(f'NL PKI root for validation failed to load. Not validating: {error}')
 
     certs: CertList = {}
     response = requests.get(CERTS_URL_NL, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
     certs_json = json.loads(response.content)
 
-    payload   = b64decode(certs_json['payload'])
+    payload = b64decode(certs_json['payload'])
 
     # Signature is a CMS (rfc5652) detached signature of the payload.
     # The certificate chain in this pkcs#7 signature rolls up to the
     # rootkey of the Kingdom of the Netherlands (https://www.pkioverheid.nl)
     #
-    signature = certs_json['signature']
+    signature = b64decode(certs_json['signature'])
 
-    if cacert:
-        if pkcs7_detached.verify_detached_signature(payload.decode(), signature, cacert) != True:
-            print_err("Signature on the trustfile of the Netherlands did not verify against the countries National PKI root")
-            exit(1)
+    if root_cert and not verify_pkcs7_detached_signature(payload, signature, root_cert):
+        raise ValueError("Signature on the trustfile of the Netherlands (NL) did not verify against the countries National PKI root")
 
     payload_dict = json.loads(payload)
     #
-    # We ignore the 'nl_keys'] - these are for the domestic QR codes; which are
+    # We ignore the 'nl_keys' - these are for the domestic QR codes; which are
     # privacy preserving C.L. signature based to allow for unlinkability as to
     # prevent tracking/surveilance.
     #
@@ -845,7 +875,7 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
         key_id = b64decode(key_id_b64)
 
         for entry in pubkeys:
-            # XXX: Why is pubkeys an array? How can there be more than one key to a key ID?
+            # XXX: Why is subjectPk an array? How can there be more than one key to a key ID?
             pubkey_der = b64decode(entry['subjectPk'])
             # entry['keyUsage'] is array of 't' or 'v' or 'r'
             try:
@@ -1638,6 +1668,9 @@ def main() -> None:
 
     ehc_codes: List[str] = []
     if args.image:
+        from pyzbar.pyzbar import decode as decode_qrcode # type: ignore
+        from PIL import Image # type: ignore
+
         for filename in args.ehc_code:
             image = Image.open(filename, 'r')
             qrcodes = decode_qrcode(image)
