@@ -11,6 +11,7 @@ import argparse
 import codecs
 import hashlib
 import enum
+import shutil
 
 from os.path import splitext
 from datetime import date, datetime, timedelta, timezone
@@ -1097,9 +1098,10 @@ def get_ch_root_cert(token: Optional[str] = None) -> x509.Certificate:
     return load_pem_x509_certificate(response.content)
 
 ROOT_CERT_DOWNLOADERS: Dict[str, Callable[[], x509.Certificate]] = {
+    'AT':      get_at_new_root_cert,
     'AT-NEW':  get_at_new_root_cert,
     'AT-TEST': get_at_test_root_cert,
-    'DE':      get_de_root_cert, # actuall just pub key
+    'DE':      get_de_root_cert, # actually just a public key
     'NL':      get_nl_root_cert,
     'SE':      get_se_root_cert,
     'CH':      get_ch_root_cert,
@@ -1543,28 +1545,37 @@ def save_certs(certs: CertList, certs_path: str, allow_public_key_only: bool = F
     else:
         raise ValueError(f'Unsupported certificates file extension: {ext!r}')
 
+def split_lines(text: str, width: int) -> List[str]:
+    lines: List[str] = []
+    for line_str in text.split('\n'):
+        line: List[str] = []
+        line_len = 0
+        for word in line_str.split(' '):
+            word_len = len(word)
+            next_len = line_len + word_len
+            if line: next_len += 1
+            if next_len > width:
+                lines.append(' '.join(line))
+                line.clear()
+                line_len = 0
+            elif line:
+                line_len += 1
+
+            line.append(word)
+            line_len += word_len
+
+        lines.append(' '.join(line))
+    return lines
+
+def fill_text(text: str, width: int, indent: str) -> str:
+    return '\n'.join(indent + line for line in split_lines(text, width - len(indent)))
+
 class SmartFormatter(argparse.HelpFormatter):
-    def _split_lines(self, text: str, width: int):
-        lines: List[str] = []
-        for line_str in text.split('\n'):
-            line: List[str] = []
-            line_len = 0
-            for word in line_str.split():
-                word_len = len(word)
-                next_len = line_len + word_len
-                if line: next_len += 1
-                if next_len > width:
-                    lines.append(' '.join(line))
-                    line.clear()
-                    line_len = 0
-                elif line:
-                    line_len += 1
+    def _split_lines(self, text: str, width: int) -> List[str]:
+        return split_lines(text, width)
 
-                line.append(word)
-                line_len += word_len
-
-            lines.append(' '.join(line))
-        return lines
+    def _fill_text(self, text: str, width: int, indent: str) -> str:
+        return fill_text(text, width, indent)
 
 def parse_sources(sources_str: str) -> List[str]:
     sources_str = sources_str.strip()
@@ -1607,27 +1618,27 @@ def print_table(header: List[str], align: List[Align], body: List[List[str]]) ->
         print(' | '.join(alignment.align(cell, width) for alignment, cell, width in zip(align, row, widths)).rstrip())
 
 def main() -> None:
-    ap = argparse.ArgumentParser(formatter_class=SmartFormatter, epilog=
-        'Report issues to: https://github.com/panzi/verify-ehc/issues')
+    ap = argparse.ArgumentParser(formatter_class=SmartFormatter, add_help=False)
+
+    ap.add_argument('--help', '-h', action='store_true', default=False, help=
+        'Show this help message and exit.')
 
     certs_ap = ap.add_mutually_exclusive_group()
+
     certs_ap.add_argument('--certs-file', metavar="FILE", help=
         'Trust list in CBOR or JSON format.')
+
     certs_ap.add_argument('--certs-from', metavar="LIST", help=
         "Download trust list from given country's trust list service. Comma separated list, entries from later country overwrites earlier.\n"
+        "See also environment variables.\n"
         "\n"
         "Supported countries: AT, CH, DE, FR, GB, NL, NO, SE\n"
-        "\n"
-        "CH needs the environment variable CH_TOKEN set to a bearer token that can be found in the BIT's Android CovidCertificate app APK. See also: https://github.com/cn-uofbasel/ch-dcc-keys\n"
-        "\n"
-        "FR needs the environment variable FR_TOKEN set to a bearer token that can be found in the TousAntiCovid Verif app APK.\n"
-        "\n"
-        "NO needs the environment variable NO_TOKEN set to an AuthorizationHeader string that can be found in the Kontroll av koronasertifikat app APK. See also: https://harrisonsand.com/posts/covid-certificates/\n"
         "\n"
         "Note that the GB trust list only contains GB public keys, so you might want to combine it with another.\n"
         "\n"
         "If neither --certs-file nor --certs-from is given then --certs-from=DE,AT is used as default.\n",
         default='DE,AT')
+
     certs_ap.add_argument('--certs-table', metavar='LIST', help=
         'Print table of trust list certificates showing where which key ID is avaliable showing the country of the certificate as it is known to the given trust list. '
         '"X" means the certificate/public key is in the trust list, but no country attribute is known for it.')
@@ -1636,17 +1647,25 @@ def main() -> None:
 
     ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
     ap.add_argument('--print-exts', action='store_true', help='Also print certificate extensions.')
-    ap.add_argument('--strip-revoked', action='store_true', help='Strip revoked certificates. (Downloads certificate revocation list, if supported by certificate.)')
-    ap.add_argument('--save-certs', metavar='FILE', action='append', help='Store downloaded trust list to FILE. The filetype is derived from the extension, which can be .json or .cbor')
+
+    ap.add_argument('--strip-revoked', action='store_true', help=
+        'Strip revoked certificates. (Downloads certificate revocation list, if supported by certificate.)')
+
+    ap.add_argument('--save-certs', metavar='FILE', action='append', help=
+        'Store downloaded trust list to FILE. The filetype is derived from the extension, which can be .json or .cbor')
+
     ap.add_argument('--download-root-cert', metavar='SOURCE[@FILENAME]', action='append', help=
         'Download and store root certificate (or public key) of SOURCE as FILENAME. '
         'If FILENAME is not given SOURCE.pem is used. '
         'If FILENAME ends in ".pem" the certificate (or public key) is stored encoded as PEM, otherwise it is encoded as DER.')
+
     ap.add_argument('--download-all-root-certs', action='store_true', help=
         'Download and store all root certificates (or public keys) and store them in SOURCE.pem files.')
+
     ap.add_argument('--allow-public-key-only', '--allow-pubkey-only', action='store_true', help=
         'When writing the CBOR trust list format it usually rejects entries that are only public keys and not full x509 certificates. '
         'With this options it also writes entries that are only public keys.')
+
     ap.add_argument('--envfile', metavar='FILE', default='.env', help=
         'Load environment variables from FILE. Default is ".env". '
         'Set this to an empty string to not load environment varibles from a file.')
@@ -1655,6 +1674,85 @@ def main() -> None:
     ap.add_argument('ehc_code', nargs='*', help='Scanned EHC QR-code, or when --image is passed path to an image file.')
 
     args = ap.parse_args()
+
+    if args.help:
+        width = shutil.get_terminal_size().columns
+
+        extra_help: List[Tuple[str, List[Tuple[str, str]]]] = [
+            (
+                'environment variables:',
+                [
+                    (
+                        '<SOURCE>_ROOT_CERT',
+                        "Some of the trust lists are have signatures that can be checked with a certain trust list "
+                        "specific root certificate (or just public key in the case of DE). Instead of always downloading "
+                        "these certificates you can just download them once using --download-root-cert or "
+                        "--download-all-root-certs and then supply them to this script using environment variables. "
+                        "The environment variable can be a path to a PEM or DER encoded certificate, a PEM encoded "
+                        "public key, or the value of the environment variable itself can be a PEM encoded certificate "
+                        "or public key. You can use this to pin the root certificate.\n"
+                        "\n"
+                        "Example:\n"
+                        "  ./verify_ehc.py --download-root-cert SE@se_root_cert.crt\n"
+                        "  export SE_ROOT_CERT=se_root_cert.crt\n"
+                        "  ./verify_ehc.py --certs-from SE --save-certs certs.cbor\n"
+                        "\n"
+                        "Trust list sources for which root certificates are supported:\n"
+                        "  AT, CH, DE, NL, SE"
+                    ),
+                    (
+                        'CH_TOKEN',
+                        "Downloading the Swiss (CH) trust list needs the environment variable CH_TOKEN set to a bearer "
+                        "token that can be found in the BIT's Android CovidCertificate app APK. "
+                        "See also: https://github.com/cn-uofbasel/ch-dcc-keys"
+                    ),
+                    (
+                        'FR_TOKEN',
+                        "Downloading the French (FR) trust list needs the environment variable FR_TOKEN set to a bearer "
+                        "token that can be found in the TousAntiCovid Verif app APK."
+                    ),
+                    (
+                        'NO_TOKEN',
+                        "Downloading the Norwegian (NO) trust list needs the environment variable NO_TOKEN set to an "
+                        "AuthorizationHeader string that can be found in the Kontroll av koronasertifikat app APK. "
+                        "See also: https://harrisonsand.com/posts/covid-certificates/"
+                    ),
+                ]
+            )
+        ]
+
+        ap.print_help()
+        print()
+
+        item_name_limit = 20
+        for title, help_items in extra_help:
+            print(title)
+
+            max_item_name_len = 0
+            for item_name, description in help_items:
+                item_name_len = len(item_name)
+                if item_name_len > max_item_name_len and item_name_len < item_name_limit:
+                    max_item_name_len = item_name_len
+
+            if max_item_name_len == 0:
+                max_item_name_len = item_name_limit
+
+            rest_width = max(width - 4 - max_item_name_len, 1)
+            indent = ' ' * (width - rest_width)
+            for item_name, description in help_items:
+                lines = split_lines(description, rest_width)
+                if len(item_name) > item_name_limit:
+                    print(f'  {item_name}')
+                else:
+                    print(f'  {item_name.ljust(max_item_name_len)}  {lines[0]}')
+                    lines = lines[1:]
+
+                for line in lines:
+                    print(indent + line)
+                print()
+        print('Report issues to: https://github.com/panzi/verify-ehc/issues')
+
+        return
 
     if args.envfile:
         try:

@@ -46,11 +46,13 @@ Usage
 -----
 
 ```plain
-usage: verify_ehc.py [-h]
+usage: verify_ehc.py [--help]
                      [--certs-file FILE | --certs-from LIST | --certs-table LIST]
                      [--no-verify] [--list-certs] [--print-exts]
                      [--strip-revoked] [--save-certs FILE]
-                     [--allow-public-key-only] [--image]
+                     [--download-root-cert SOURCE[@FILENAME]]
+                     [--download-all-root-certs] [--allow-public-key-only]
+                     [--envfile FILE] [--image]
                      [ehc_code ...]
 
 positional arguments:
@@ -58,27 +60,14 @@ positional arguments:
                         an image file.
 
 optional arguments:
-  -h, --help            show this help message and exit
+  --help, -h            Show this help message and exit.
   --certs-file FILE     Trust list in CBOR or JSON format.
   --certs-from LIST     Download trust list from given country's trust list
                         service. Comma separated list, entries from later
                         country overwrites earlier.
+                        See also environment variables.
                         
                         Supported countries: AT, CH, DE, FR, GB, NL, NO, SE
-                        
-                        CH needs the environment variable CH_TOKEN set to a
-                        bearer token that can be found in the BIT's Android
-                        CovidCertificate app APK. See also:
-                        https://github.com/cn-uofbasel/ch-dcc-keys
-                        
-                        FR needs the environment variable FR_TOKEN set to a
-                        bearer token that can be found in the TousAntiCovid
-                        Verif app APK.
-                        
-                        NO needs the environment variable NO_TOKEN set to an
-                        AuthorizationHeader string that can be found in the
-                        Kontroll av koronasertifikat app APK. See also:
-                        https://harrisonsand.com/posts/covid-certificates/
                         
                         Note that the GB trust list only contains GB public
                         keys, so you might want to combine it with another.
@@ -98,13 +87,64 @@ optional arguments:
                         revocation list, if supported by certificate.)
   --save-certs FILE     Store downloaded trust list to FILE. The filetype is
                         derived from the extension, which can be .json or .cbor
+  --download-root-cert SOURCE[@FILENAME]
+                        Download and store root certificate (or public key) of
+                        SOURCE as FILENAME. If FILENAME is not given SOURCE.pem
+                        is used. If FILENAME ends in ".pem" the certificate (or
+                        public key) is stored encoded as PEM, otherwise it is
+                        encoded as DER.
+  --download-all-root-certs
+                        Download and store all root certificates (or public
+                        keys) and store them in SOURCE.pem files.
   --allow-public-key-only, --allow-pubkey-only
                         When writing the CBOR trust list format it usually
                         rejects entries that are only public keys and not full
                         x509 certificates. With this options it also writes
                         entries that are only public keys.
+  --envfile FILE        Load environment variables from FILE. Default is
+                        ".env". Set this to an empty string to not load
+                        environment varibles from a file.
   --image               ehc_code is a path to an image file containing a
                         QR-code.
+
+environment variables:
+  <SOURCE>_ROOT_CERT  Some of the trust lists are have signatures that can be
+                      checked with a certain trust list specific root certificate
+                      (or just public key in the case of DE). Instead of always
+                      downloading these certificates you can just download them
+                      once using --download-root-cert or
+                      --download-all-root-certs and then supply them to this
+                      script using environment variables. The environment
+                      variable can be a path to a PEM or DER encoded certificate,
+                      a PEM encoded public key, or the value of the environment
+                      variable itself can be a PEM encoded certificate or public
+                      key. You can use this to pin the root certificate.
+                      
+                      Example:
+                        ./verify_ehc.py --download-root-cert SE@se_root_cert.crt
+                        export SE_ROOT_CERT=se_root_cert.crt
+                        ./verify_ehc.py --certs-from SE --save-certs certs.cbor
+                      
+                      Trust list sources for which root certificates are
+                      supported:
+                        AT, CH, DE, NL, SE
+
+  CH_TOKEN            Downloading the Swiss (CH) trust list needs the environment
+                      variable CH_TOKEN set to a bearer token that can be found
+                      in the BIT's Android CovidCertificate app APK. See also:
+                      https://github.com/cn-uofbasel/ch-dcc-keys
+
+  FR_TOKEN            Downloading the French (FR) trust list needs the
+                      environment variable FR_TOKEN set to a bearer token that
+                      can be found in the TousAntiCovid Verif app APK.
+
+  NO_TOKEN            Downloading the Norwegian (NO) trust list needs the
+                      environment variable NO_TOKEN set to an AuthorizationHeader
+                      string that can be found in the Kontroll av
+                      koronasertifikat app APK. See also:
+                      https://harrisonsand.com/posts/covid-certificates/
+
+Report issues to: https://github.com/panzi/verify-ehc/issues
 ```
 
 You can also use this tool to download the trust list as provided of one (or
