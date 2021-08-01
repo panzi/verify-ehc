@@ -803,7 +803,7 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
         if asn1cert.name == 'certificate':
             trustchain.append(load_der_x509_certificate(asn1cert.chosen.dump()))
         else:
-            raise NotImplementedError(f'certificate type not supported: {asn1cert.name}')
+            raise NotImplementedError(f'Certificate option in trust chain not supported: {asn1cert.name}')
 
     trustchain.reverse()
 
@@ -847,7 +847,8 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
                 )
             else:
                 pubkey_type = type(pubkey)
-                raise NotImplementedError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+                raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+
         except InvalidSignature:
             try:
                 subject_key_id = signed_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
@@ -877,15 +878,15 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
             has_message_digest = False
             for signed_attr in signed_attrs:
                 if signed_attr['type'].native == 'message_digest':
-                    has_message_digest = True
                     for msg_digest in signed_attr['values'].native:
+                        has_message_digest = True
                         if digest != msg_digest:
-                            raise ValueError(f'NL trust list payload digest missmatch.\n'
-                                            f'expected: {msg_digest.hex()}\n'
-                                            f'actual: {digest.hex()}')
+                            raise ValueError(f'Payload digest missmatch.\n'
+                                             f'expected: {msg_digest.hex()}\n'
+                                             f'actual: {digest.hex()}')
 
             if not has_message_digest:
-                raise ValueError(f'message digest signed attribute is missing')
+                raise ValueError(f'Message digest signed attribute is missing.')
 
             signed_attrs_bytes = bytearray(signed_attrs.dump())
             #signed_attrs_bytes[0] = ASN1_SET | ASN1_CONSTRUCTED
@@ -899,7 +900,7 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
         try:
             if isinstance(pubkey, RSAPublicKey):
                 if sig_algo != 'rsassa_pkcs1v15':
-                    raise NotImplementedError(f'unsupported signature algorithm: {sig_algo}')
+                    raise NotImplementedError(f'Unsupported signature algorithm: {sig_algo}')
 
                 pubkey.verify(
                     sign,
@@ -915,7 +916,8 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
                 )
             else:
                 pubkey_type = type(pubkey)
-                raise NotImplementedError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+                raise NotImplementedError(f'uUnsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+
         except InvalidSignature:
             return False
 
