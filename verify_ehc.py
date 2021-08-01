@@ -193,7 +193,7 @@ PUBKEY_URL_DE = 'https://github.com/Digitaler-Impfnachweis/covpass-ios/raw/main/
 #    base64 -d |\
 #    jq .eu_keys
 CERTS_URL_NL     = 'https://verifier-api.coronacheck.nl/v4/verifier/public_keys'
-ROOT_CERT_URL_NL = 'http://cert.pkioverheid.nl/RootCA-G3.cer'
+ROOT_CERT_URL_NL = 'http://cert.pkioverheid.nl/EVRootCA.cer'
 
 # Keys from a French validation app (nothing official, just a hobby project by someone):
 # https://github.com/lovasoa/sanipasse/blob/master/src/assets/Digital_Green_Certificate_Signing_Keys.json
