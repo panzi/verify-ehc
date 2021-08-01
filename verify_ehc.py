@@ -914,15 +914,11 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
                 if signed_attr['type'].native == 'message_digest':
                     for msg_digest in signed_attr['values'].native:
                         if digest != msg_digest:
-                            raise ValueError(f'NL trust list payload digest missmatch.\nexpected: {msg_digest.hex()}\nactual: {digest.hex()}')
+                            raise ValueError(f'NL trust list payload digest missmatch.\n'
+                                             f'expected: {msg_digest.hex()}\n'
+                                             f'actual: {digest.hex()}')
 
             sign = signer_info['signature'].native
-
-            # ???
-            #r = int.from_bytes(sign[:len(sign)//2], byteorder="big", signed=False)
-            #s = int.from_bytes(sign[len(sign)//2:], byteorder="big", signed=False)
-            #
-            #sign_dds = encode_dss_signature(r, s)
 
             try:
                 if isinstance(pubkey, RSAPublicKey):
@@ -930,10 +926,13 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
                         raise NotImplementedError(f'unsupported signature algorithm: {sig_algo}')
 
                     print('RSA')
+                    print('sign byte count:', len(sign))
+                    print('sign bit count:', len(sign) * 8)
+                    print('key_size:      ', pubkey.key_size)
                     # XXX: this fails. why?
                     pubkey.verify(
-                        sign, #sign_dds,
-                        digest, #payload, ?
+                        sign,
+                        digest,
                         rsa_padding,
                         #last_cert.signature_hash_algorithm, # type: ignore
                         HASH_ALGORITHMS[digest_algo](), # type: ignore
@@ -948,6 +947,7 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
                 else:
                     pubkey_type = type(pubkey)
                     raise NotImplementedError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+
             except InvalidSignature:
                 raise ValueError(f'Invalid signature of NL trust list: {sign.hex()}')
 
