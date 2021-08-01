@@ -139,6 +139,7 @@ SIGN_URL_AT_PROD  = 'https://dgc-trust.qr.gv.at/trustlistsig'
 CERTS_URL_AT_TEST = 'https://dgc-trusttest.qr.gv.at/trustlist'
 SIGN_URL_AT_TEST  = 'https://dgc-trusttest.qr.gv.at/trustlistsig'
 
+ROOT_CERT_KEY_ID_AT = b'\xe0\x9f\xf7\x8f\x02R\x06\xb6'
 # These root certs are copied from some presentation slides.
 # TODO: Link a proper source here once it becomes available?
 #
@@ -506,41 +507,12 @@ def download_at_certs() -> CertList:
         raise TypeError(f'AT trust list: expected signature to be a Sign1 COSE message, but is: {msg_type.__module__}.{msg_type.__name__}')
 
     root_cert_key_id = sig_msg.phdr.get(KID) or sig_msg.uhdr[KID]
+    root_cert: Optional[x509.Certificate] = None
 
-    # TODO: Find out another place where to get the AT root certificate from.
-    #       This gets it from the same server as the trust list itself, which is suboptimal.
-    # TODO: Maybe look if there is a revocation list URL in root_cert.extensions?
-
-    response = requests.get('https://greencheck.gv.at/', headers={'User-Agent': USER_AGENT})
-    status_code = response.status_code
-    if status_code < 200 or status_code >= 300:
-        print_err(f'https://greencheck.gv.at/ {status_code} {http.client.responses.get(status_code, "")}')
-    else:
-        doc = parse_html(response.content.decode(response.encoding))
-
-        root_cert: Optional[x509.Certificate] = None
-        for script in doc.xpath('//script'):
-            src = script.attrib.get('src')
-            if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
-                response = requests.get(f'https://greencheck.gv.at{src}', headers={'User-Agent': USER_AGENT})
-                status_code = response.status_code
-                if status_code < 200 or status_code >= 300:
-                    print_err(f'https://greencheck.gv.at{src} {status_code} {http.client.responses.get(status_code, "")}')
-                else:
-                    source = response.content.decode(response.encoding)
-                    match = JS_CERT_PATTERN.search(source)
-                    if match:
-                        certs_pems_js = match.group(1)
-                        certs_pems_js = ESC.sub(lambda match: chr(int(match[1], 16)), certs_pems_js)
-
-                        for meta_cert_key, meta_cert_src in json.loads(certs_pems_js).items():
-                            meta_cert = load_pem_x509_certificate(meta_cert_src.encode())
-
-                            key_id = meta_cert.fingerprint(hashes.SHA256())[:8]
-                            if key_id == root_cert_key_id:
-                                root_cert = meta_cert
-                                break
-                    break
+    try:
+        root_cert = get_at_root_cert(root_cert_key_id)
+    except (BaseHTTPError, ValueError, KeyError) as error:
+        print_err(f'AT trust list error (NOT VALIDATING): {error}')
 
     if root_cert:
         now = datetime.utcnow()
@@ -1053,6 +1025,38 @@ def download_ehc_certs(sources: List[str], certs_table: Dict[str, CertList] = {}
 
     return certs
 
+def get_at_root_cert(root_cert_key_id: bytes = ROOT_CERT_KEY_ID_AT) -> x509.Certificate:
+    # TODO: Find out another place where to get the AT root certificate from.
+    #       This gets it from the same server as the trust list itself, which is suboptimal.
+
+    response = requests.get('https://greencheck.gv.at/', headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+
+    doc = parse_html(response.content.decode(response.encoding))
+
+    for script in doc.xpath('//script'):
+        src = script.attrib.get('src')
+        if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
+            response = requests.get(f'https://greencheck.gv.at{src}', headers={'User-Agent': USER_AGENT})
+            status_code = response.status_code
+            if status_code < 200 or status_code >= 300:
+                print_err(f'https://greencheck.gv.at{src} {status_code} {http.client.responses.get(status_code, "")}')
+            else:
+                source = response.content.decode(response.encoding)
+                match = JS_CERT_PATTERN.search(source)
+                if match:
+                    certs_pems_js = match.group(1)
+                    certs_pems_js = ESC.sub(lambda match: chr(int(match[1], 16)), certs_pems_js)
+
+                    for meta_cert_key, meta_cert_src in json.loads(certs_pems_js).items():
+                        meta_cert = load_pem_x509_certificate(meta_cert_src.encode())
+
+                        key_id = meta_cert.fingerprint(hashes.SHA256())[:8]
+                        if key_id == root_cert_key_id:
+                            return meta_cert
+
+    raise KeyError(f'AT certificate with key ID {format_key_id(root_cert_key_id)} not found!')
+
 def get_at_new_root_cert() -> x509.Certificate:
     return load_pem_x509_certificate(ROOT_CERT_AT_PROD)
 
@@ -1098,7 +1102,7 @@ def get_ch_root_cert(token: Optional[str] = None) -> x509.Certificate:
     return load_pem_x509_certificate(response.content)
 
 ROOT_CERT_DOWNLOADERS: Dict[str, Callable[[], x509.Certificate]] = {
-    'AT':      get_at_new_root_cert,
+    'AT':      get_at_root_cert,
     'AT-NEW':  get_at_new_root_cert,
     'AT-TEST': get_at_test_root_cert,
     'DE':      get_de_root_cert, # actually just a public key
