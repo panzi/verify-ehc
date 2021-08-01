@@ -1704,7 +1704,7 @@ def main() -> None:
                         "Trust list sources for which root certificates are supported:\n"
                         "  AT, CH, DE, NL, SE"
                     ),
-                    # TODO: Write propper help text once this information becomes available.
+                    # TODO: Write proper help text once this information becomes available.
                     #(
                     #    'AT_TOKEN',
                     #    "Downloading the Austrian (AT) trust list needs the nevironment variable AT_TOKEN set to "
