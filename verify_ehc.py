@@ -793,8 +793,6 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
 
     return certs
 
-# from pkcs7_detached, except no need to re-encode and re-decode everything
-# see: https://github.com/jnewbigin/pkcs7_detached/blob/master/pkcs7_detached/__init__.py
 def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert: x509.Certificate) -> bool:
     content_info = asn1crypto.cms.ContentInfo.load(signature)
     content = content_info['content']
