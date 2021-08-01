@@ -1714,9 +1714,9 @@ def main() -> None:
                     #),
                     (
                         'CH_TOKEN',
-                        "Downloading the Swiss (CH) trust list needs the environment variable CH_TOKEN set to a bearer "
-                        "token that can be found in the BIT's Android CovidCertificate app APK. "
-                        "See also: https://github.com/cn-uofbasel/ch-dcc-keys"
+                        "Downloading the Swiss (CH) trust list and root certificate needs the environment variable "
+                        "CH_TOKEN set to a bearer token that can be found in the BIT's Android CovidCertificate app "
+                        "APK. See also: https://github.com/cn-uofbasel/ch-dcc-keys"
                     ),
                     (
                         'FR_TOKEN',

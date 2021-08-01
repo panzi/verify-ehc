@@ -129,9 +129,10 @@ environment variables:
                       supported:
                         AT, CH, DE, NL, SE
 
-  CH_TOKEN            Downloading the Swiss (CH) trust list needs the environment
-                      variable CH_TOKEN set to a bearer token that can be found
-                      in the BIT's Android CovidCertificate app APK. See also:
+  CH_TOKEN            Downloading the Swiss (CH) trust list and root certificate
+                      needs the environment variable CH_TOKEN set to a bearer
+                      token that can be found in the BIT's Android
+                      CovidCertificate app APK. See also:
                       https://github.com/cn-uofbasel/ch-dcc-keys
 
   FR_TOKEN            Downloading the French (FR) trust list needs the
