@@ -640,7 +640,7 @@ def download_se_certs() -> CertList:
     response.raise_for_status()
 
     if root_cert is None:
-        token = jwt.get_unverified_claims(response.content.decode(response.encoding))
+        token = jwt.get_unverified_claims(response.content.decode(response.encoding or 'UTF-8'))
     else:
         token = load_jwt(response.content, root_cert, {'verify_aud': False})
 
@@ -881,7 +881,7 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
     try:
         root_cert = get_root_cert('CH')
     except (BaseHTTPError, ValueError) as error:
-        print_err(f'SE trust list error (NOT VALIDATING): {error}')
+        print_err(f'CH trust list error (NOT VALIDATING): {error}')
 
     response = requests.get(CERTS_URL_CH, headers={
         'User-Agent': CH_USER_AGENT,
@@ -892,7 +892,7 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
     response.raise_for_status()
 
     if root_cert is None:
-        certs_token = jwt.get_unverified_claims(response.content.decode(response.encoding))
+        certs_token = jwt.get_unverified_claims(response.content.decode(response.encoding or 'UTF-8'))
     else:
         certs_token = load_jwt(response.content, root_cert)
 
@@ -907,7 +907,7 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
     })
     response.raise_for_status()
     if root_cert is None:
-        update_token = jwt.get_unverified_claims(response.content.decode(response.encoding))
+        update_token = jwt.get_unverified_claims(response.content.decode(response.encoding or 'UTF-8'))
     else:
         update_token = load_jwt(response.content, root_cert)
     pubkeys: List[Dict[str, Optional[str]]] = update_token['certs']
@@ -1053,7 +1053,7 @@ def get_at_root_cert(root_cert_key_id: bytes = ROOT_CERT_KEY_ID_AT) -> x509.Cert
     response = requests.get('https://greencheck.gv.at/', headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
 
-    doc = parse_html(response.content.decode(response.encoding))
+    doc = parse_html(response.content.decode(response.encoding or 'UTF-8'))
 
     for script in doc.xpath('//script'):
         src = script.attrib.get('src')
@@ -1063,7 +1063,7 @@ def get_at_root_cert(root_cert_key_id: bytes = ROOT_CERT_KEY_ID_AT) -> x509.Cert
             if status_code < 200 or status_code >= 300:
                 print_err(f'https://greencheck.gv.at{src} {status_code} {http.client.responses.get(status_code, "")}')
             else:
-                source = response.content.decode(response.encoding)
+                source = response.content.decode(response.encoding or 'UTF-8')
                 match = JS_CERT_PATTERN.search(source)
                 if match:
                     certs_pems_js = match.group(1)
