@@ -53,9 +53,6 @@ from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey,
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
-from cryptography.hazmat.bindings.openssl import binding
-from cryptography.hazmat.backends.openssl.backend import backend # type: ignore
-from cryptography.hazmat.bindings._openssl import ffi, lib # type: ignore
 
 # based on: https://github.com/ehn-digital-green-development/ehn-sign-verify-python-trivial
 
