@@ -62,6 +62,7 @@ from cryptography.hazmat.bindings._openssl import ffi, lib # type: ignore
 # Digital Green Certificate Gateway API SPEC: https://eu-digital-green-certificates.github.io/dgc-gateway/#/Trust%20Lists/downloadTrustList
 # But where is it hosted?
 
+# these would need parameters: 'blake2b', 'blake2s', 'sha512-224', 'sha512-256', 'shake256', 'shake128'
 HASH_ALGORITHMS: Dict[str, Type[hashes.HashAlgorithm]] = {}
 
 for attr_name in dir(hashes):
@@ -794,34 +795,133 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
 
 # from pkcs7_detached, except no need to re-encode and re-decode everything
 # see: https://github.com/jnewbigin/pkcs7_detached/blob/master/pkcs7_detached/__init__.py
-def verify_pkcs7_detached_signature(document: bytes, signature: bytes, certificate: x509.Certificate) -> bool:
-    # Load the string into a bio
-    bio = backend._bytes_to_bio(signature) # pylint: disable=W0212
+def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert: x509.Certificate) -> bool:
+    content_info = asn1crypto.cms.ContentInfo.load(signature)
+    content = content_info['content']
+    cert_set = content['certificates']
 
-    # Create the pkcs7 object
-    pkcs7_object = lib.d2i_PKCS7_bio(bio.bio, ffi.NULL)
-    if pkcs7_object == ffi.NULL:
-        binding._consume_errors(lib)
-        raise ValueError("Unable to parse PKCS7 data")
+    trustchain: List[x509.Certificate] = []
+    for asn1cert in cert_set:
+        if asn1cert.name == 'certificate':
+            trustchain.append(load_der_x509_certificate(asn1cert.chosen.dump()))
+        else:
+            raise NotImplementedError(f'certificate type not supported: {asn1cert.name}')
 
-    # Load the specified certificate
-    stack = lib.sk_X509_new_null()
-    res = lib.sk_X509_push(stack, certificate._x509) # type: ignore
-    binding._openssl_assert(lib, res >= 1)
+    trustchain.reverse()
 
-    # We need a CA store, even though we don't use it
-    store = lib.X509_STORE_new()
-    binding._openssl_assert(lib, store != ffi.NULL)
+    first_cert = trustchain[-1]
+    if root_cert != first_cert:
+        try:
+            subject_key_id = first_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
+        except ExtensionNotFound:
+            subject_key_id_str = 'N/A'
+        else:
+            subject_key_id_str = ':'.join('%02X' % x for x in subject_key_id)
 
-    # Load the document into a bio
-    content = backend._bytes_to_bio(document) # pylint: disable=W0212
+        fingerprint = first_cert.fingerprint(hashes.SHA256())
+        fingerprint_str = ':'.join('%02X' % x for x in fingerprint)
+        raise ValueError(f'Trust chain has unexpected root certificate.\n'
+                         f'fingerprint: {fingerprint_str}\n'
+                         f'subject key ID: {subject_key_id_str}')
 
-    # If PKCS7_NOVERIFY is set the signer's certificates are not chain verified.
-    # TODO: This is not good, but how to do it correctly?
-    flags = lib.PKCS7_NOVERIFY
+    # just to be sure that there is no trickery:
+    trustchain[-1] = root_cert
 
-    # https://www.openssl.org/docs/man1.0.2/crypto/PKCS7_verify.html
-    return lib.PKCS7_verify(pkcs7_object, stack, store, content.bio, ffi.NULL, flags) == 1
+    rsa_padding = PKCS1v15()
+    for index in range(len(trustchain) - 1):
+        signed_cert = trustchain[index]
+        issuer_cert = trustchain[index + 1]
+
+        pubkey = issuer_cert.public_key()
+        try:
+            if isinstance(pubkey, RSAPublicKey):
+                pubkey.verify(
+                    signed_cert.signature,
+                    signed_cert.tbs_certificate_bytes,
+                    rsa_padding,
+                    signed_cert.signature_hash_algorithm, # type: ignore
+                )
+            elif isinstance(pubkey, EllipticCurvePublicKey):
+                pubkey.verify(
+                    signed_cert.signature,
+                    signed_cert.tbs_certificate_bytes,
+                    ECDSA(signed_cert.signature_hash_algorithm),
+                )
+            else:
+                pubkey_type = type(pubkey)
+                raise NotImplementedError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+        except InvalidSignature:
+            try:
+                subject_key_id = signed_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
+            except ExtensionNotFound:
+                subject_key_id_str = 'N/A'
+            else:
+                subject_key_id_str = ':'.join('%02X' % x for x in subject_key_id)
+
+            fingerprint = signed_cert.fingerprint(hashes.SHA256())
+            fingerprint_str = ':'.join('%02X' % x for x in fingerprint)
+            raise ValueError(f'Could not verify signature of a certificate in the trust chain.\n'
+                             f'fingerprint: {fingerprint_str}\n'
+                             f'subject key ID: {subject_key_id_str}')
+
+    last_cert = trustchain[0]
+    pubkey = last_cert.public_key()
+    for signer_info in content['signer_infos']:
+        digest_algo = signer_info['digest_algorithm']['algorithm'].native
+        digest = hashlib.new(digest_algo, payload).digest()
+
+        sig_algo = signer_info['signature_algorithm']['algorithm'].native
+
+        signed_attrs = signer_info['signed_attrs']
+        # see: https://datatracker.ietf.org/doc/html/rfc5652#section-5.4
+        signed_data: Union[bytes, bytearray]
+        if signed_attrs:
+            has_message_digest = False
+            for signed_attr in signed_attrs:
+                if signed_attr['type'].native == 'message_digest':
+                    has_message_digest = True
+                    for msg_digest in signed_attr['values'].native:
+                        if digest != msg_digest:
+                            raise ValueError(f'NL trust list payload digest missmatch.\n'
+                                            f'expected: {msg_digest.hex()}\n'
+                                            f'actual: {digest.hex()}')
+
+            if not has_message_digest:
+                raise ValueError(f'message digest signed attribute is missing')
+
+            signed_attrs_bytes = bytearray(signed_attrs.dump())
+            #signed_attrs_bytes[0] = ASN1_SET | ASN1_CONSTRUCTED
+            signed_attrs_bytes[0] = 0x11 | 0x20
+            signed_data = signed_attrs_bytes
+        else:
+            signed_data = payload
+
+        sign = signer_info['signature'].native
+
+        try:
+            if isinstance(pubkey, RSAPublicKey):
+                if sig_algo != 'rsassa_pkcs1v15':
+                    raise NotImplementedError(f'unsupported signature algorithm: {sig_algo}')
+
+                pubkey.verify(
+                    sign,
+                    signed_data,
+                    rsa_padding,
+                    HASH_ALGORITHMS[digest_algo](), # type: ignore
+                )
+            elif isinstance(pubkey, EllipticCurvePublicKey):
+                pubkey.verify(
+                    sign,
+                    signed_data,
+                    ECDSA(HASH_ALGORITHMS[digest_algo]()),
+                )
+            else:
+                pubkey_type = type(pubkey)
+                raise NotImplementedError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+        except InvalidSignature:
+            return False
+
+    return True
 
 def download_nl_certs(token: Optional[str] = None) -> CertList:
     # Fetch the root certificate for the Netherlands; used to secure the
@@ -839,121 +939,20 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
 
     payload = b64decode(certs_json['payload'])
 
-    if root_cert:
+    if root_cert is not None:
         # Signature is a CMS (rfc5652) detached signature of the payload.
         # The certificate chain in this pkcs#7 signature rolls up to the
         # rootkey of the Kingdom of the Netherlands (https://www.pkioverheid.nl)
         #
         signature = b64decode(certs_json['signature'])
 
-        content_info = asn1crypto.cms.ContentInfo.load(signature)
-        content = content_info['content']
-        cert_set = content['certificates']
-        print('signer_infos:', end=' ')
-        from pprint import pprint
-        pprint(content['signer_infos'].native)
-
-        trustchain: List[x509.Certificate] = []
-        for asn1cert in cert_set:
-            if asn1cert.name == 'certificate':
-                trustchain.append(load_der_x509_certificate(asn1cert.chosen.dump()))
-            else:
-                raise NotImplementedError(f'certificate type not supported: {asn1cert.name}')
-
-        trustchain.reverse()
-
-        first_cert = trustchain[-1]
-        if root_cert != first_cert:
-            try:
-                subject_key_id = first_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
-            except ExtensionNotFound:
-                subject_key_id_str = 'N/A'
-            else:
-                subject_key_id_str = ':'.join('%02X' % x for x in subject_key_id)
-
-            fingerprint = first_cert.fingerprint(hashes.SHA256())
-            fingerprint_str = ':'.join('%02X' % x for x in fingerprint)
-            raise ValueError(f'NL trustlist trust chain has unexpected root certificate.\nfingerprint: {fingerprint_str}\nsubject key ID: {subject_key_id_str}')
-
-        # just to be sure that there is no trickery:
-        trustchain[-1] = root_cert
-
-        rsa_padding = PKCS1v15()
-        for index in range(len(trustchain) - 1):
-            signed_cert = trustchain[index]
-            issuer_cert = trustchain[index + 1]
-
-            pubkey = issuer_cert.public_key()
-            if isinstance(pubkey, RSAPublicKey):
-                pubkey.verify(
-                    signed_cert.signature,
-                    signed_cert.tbs_certificate_bytes,
-                    rsa_padding,
-                    signed_cert.signature_hash_algorithm, # type: ignore
-                )
-            elif isinstance(pubkey, EllipticCurvePublicKey):
-                pubkey.verify(
-                    signed_cert.signature,
-                    signed_cert.tbs_certificate_bytes,
-                    ECDSA(signed_cert.signature_hash_algorithm),
-                )
-            else:
-                pubkey_type = type(pubkey)
-                raise NotImplementedError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
-
-        last_cert = trustchain[0]
-        print('last cert serial number:', last_cert.serial_number)
-        pubkey = last_cert.public_key()
-        for signer_info in content['signer_infos']:
-            digest_algo = signer_info['digest_algorithm']['algorithm'].native
-            digest = hashlib.new(digest_algo, payload).digest()
-
-            sig_algo = signer_info['signature_algorithm']['algorithm'].native
-
-            for signed_attr in signer_info['signed_attrs']:
-                if signed_attr['type'].native == 'message_digest':
-                    for msg_digest in signed_attr['values'].native:
-                        if digest != msg_digest:
-                            raise ValueError(f'NL trust list payload digest missmatch.\n'
-                                             f'expected: {msg_digest.hex()}\n'
-                                             f'actual: {digest.hex()}')
-
-            sign = signer_info['signature'].native
-
-            try:
-                if isinstance(pubkey, RSAPublicKey):
-                    if sig_algo != 'rsassa_pkcs1v15':
-                        raise NotImplementedError(f'unsupported signature algorithm: {sig_algo}')
-
-                    print('RSA')
-                    print('sign byte count:', len(sign))
-                    print('sign bit count:', len(sign) * 8)
-                    print('key_size:      ', pubkey.key_size)
-                    # XXX: this fails. why?
-                    pubkey.verify(
-                        sign,
-                        digest,
-                        rsa_padding,
-                        #last_cert.signature_hash_algorithm, # type: ignore
-                        HASH_ALGORITHMS[digest_algo](), # type: ignore
-                    )
-                elif isinstance(pubkey, EllipticCurvePublicKey):
-                    print('EC')
-                    pubkey.verify(
-                        sign,
-                        digest,
-                        ECDSA(HASH_ALGORITHMS[digest_algo]()),
-                    )
-                else:
-                    pubkey_type = type(pubkey)
-                    raise NotImplementedError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
-
-            except InvalidSignature:
-                raise ValueError(f'Invalid signature of NL trust list: {sign.hex()}')
-
-        # TODO: remove once above works:
-        if not verify_pkcs7_detached_signature(payload, signature, root_cert):
-            raise ValueError("Signature on the trustfile of the Netherlands (NL) did not verify against the countries National PKI root")
+        try:
+            valid = verify_pkcs7_detached_signature(payload, signature, root_cert)
+        except (NotImplementedError, ValueError) as error:
+            print_err(f'NL trust list error (NOT VALIDATING): {error}')
+        else:
+            if not valid:
+                raise ValueError(f'Invalid signature of NL trust list: {signature.hex()}')
 
     payload_dict = json.loads(payload)
 
