@@ -629,13 +629,20 @@ def download_de_certs() -> CertList:
 
 def download_se_certs() -> CertList:
     certs: CertList = {}
-    # TODO: don't crash when root cert is not available
-    root_cert = get_root_cert('SE')
+    root_cert: Optional[x509.Certificate] = None
+
+    try:
+        root_cert = get_root_cert('SE')
+    except (BaseHTTPError, ValueError) as error:
+        print_err(f'SE trust list error (NOT VALIDATING): {error}')
 
     response = requests.get(CERTS_URL_SE, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
 
-    token = load_jwt(response.content, root_cert, {'verify_aud': False})
+    if root_cert is None:
+        token = jwt.get_unverified_claims(response.content.decode(response.encoding))
+    else:
+        token = load_jwt(response.content, root_cert, {'verify_aud': False})
 
     for country, country_keys in token['dsc_trust_list'].items():
         for entry in country_keys['keys']:
@@ -734,7 +741,7 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
         if token is None:
             raise KeyError(
                 'Required environment variable FR_TOKEN for FR trust list is not set. '
-                'You can get the value of the token from the TousAntiCovid Verif application.')
+                'You can get the value of the token from the TousAntiCovid Verif app APK.')
 
     response = requests.get(CERTS_URL_FR, headers={
         'User-Agent': USER_AGENT,
@@ -863,14 +870,18 @@ def get_ch_token() -> str:
     if token is None:
         raise KeyError(
             "Required environment variable CH_TOKEN for CH trust list is not set. "
-            "You can get the value of the token from the BIT's Android CovidCertificate application.")
+            "You can get the value of the token from the BIT's Android CovidCertificate app APK.")
     return token
 
 def download_ch_certs(token: Optional[str] = None) -> CertList:
     if token is None:
         token = get_ch_token()
 
-    root_cert = get_root_cert('CH')
+    root_cert: Optional[x509.Certificate] = None
+    try:
+        root_cert = get_root_cert('CH')
+    except (BaseHTTPError, ValueError) as error:
+        print_err(f'SE trust list error (NOT VALIDATING): {error}')
 
     response = requests.get(CERTS_URL_CH, headers={
         'User-Agent': CH_USER_AGENT,
@@ -879,7 +890,13 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
         'Authorization': f'Bearer {token}',
     })
     response.raise_for_status()
-    active_key_ids_b64 = load_jwt(response.content, root_cert)['activeKeyIds']
+
+    if root_cert is None:
+        certs_token = jwt.get_unverified_claims(response.content.decode(response.encoding))
+    else:
+        certs_token = load_jwt(response.content, root_cert)
+
+    active_key_ids_b64 = certs_token['activeKeyIds']
     active_key_ids = frozenset(b64decode(key_id_b64) for key_id_b64 in active_key_ids_b64)
 
     response = requests.get(UPDATE_URL_CH, headers={
@@ -889,7 +906,11 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
         'Authorization': f'Bearer {token}',
     })
     response.raise_for_status()
-    pubkeys: List[Dict[str, Optional[str]]] = load_jwt(response.content, root_cert)['certs']
+    if root_cert is None:
+        update_token = jwt.get_unverified_claims(response.content.decode(response.encoding))
+    else:
+        update_token = load_jwt(response.content, root_cert)
+    pubkeys: List[Dict[str, Optional[str]]] = update_token['certs']
 
     certs: CertList = {}
 
@@ -935,7 +956,7 @@ def download_no_certs(token: Optional[str] = None) -> CertList:
         if token is None:
             raise KeyError(
                 "Required environment variable NO_TOKEN for NO trust list is not set. "
-                "You can get the value of the token from the Kontroll av koronasertifikat application.")
+                "You can get the value of the token from the Kontroll av koronasertifikat app APK.")
 
     response = requests.get(CERTS_URL_NO, headers={
         'User-Agent': NO_USER_AGENT,
