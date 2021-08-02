@@ -59,6 +59,9 @@ from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 # Digital Green Certificate Gateway API SPEC: https://eu-digital-green-certificates.github.io/dgc-gateway/#/Trust%20Lists/downloadTrustList
 # But where is it hosted?
 
+FAIL_ON_ERROR = False
+WARNING_AS_ERROR = False
+
 # these would need parameters: 'blake2b', 'blake2s', 'sha512-224', 'sha512-256', 'shake256', 'shake128'
 HASH_ALGORITHMS: Dict[str, Type[hashes.HashAlgorithm]] = {}
 
@@ -371,7 +374,7 @@ def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
                 raise TypeError(f'unhandeled public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
         if key_id in certs:
-            print_err(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
+            print_warn(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
 
         certs[key_id] = cert
 
@@ -423,7 +426,7 @@ def load_hack_certs_json(data: bytes, source: str) -> CertList:
             cert = HackCertificate(ec_pubkey, issuer, subject, not_valid_before, not_valid_after)
 
             if key_id in certs:
-                print_err(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
+                print_warn(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
 
             certs[key_id] = cert
 
@@ -437,7 +440,7 @@ def load_hack_certs_json(data: bytes, source: str) -> CertList:
             cert = HackCertificate(rsa_pubkey, issuer, subject, not_valid_before, not_valid_after)
 
             if key_id in certs:
-                print_err(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
+                print_warn(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
 
             certs[key_id] = cert
 
@@ -447,14 +450,20 @@ def load_hack_certs_json(data: bytes, source: str) -> CertList:
     return certs
 
 def print_err(msg: str) -> None:
-    # so that errors and normal output is correctly interleaved:
-    sys.stdout.flush()
-    print(f'ERROR: {msg}', file=sys.stderr)
+    if FAIL_ON_ERROR:
+        raise Exception(msg)
+    else:
+        # so that errors and normal output is correctly interleaved:
+        sys.stdout.flush()
+        print(f'ERROR: {msg}', file=sys.stderr)
 
 def print_warn(msg: str) -> None:
-    # so that errors and normal output is correctly interleaved:
-    sys.stdout.flush()
-    print(f'WARNING: {msg}', file=sys.stderr)
+    if WARNING_AS_ERROR:
+        print_err(msg)
+    else:
+        # so that errors and normal output is correctly interleaved:
+        sys.stdout.flush()
+        print(f'WARNING: {msg}', file=sys.stderr)
 
 def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = None) -> CertList:
     certs: CertList = {}
@@ -495,7 +504,7 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
                 raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
             if key_id in certs:
-                print_err(f'doubled key ID in DE trust list, only using last: {format_key_id(key_id)}')
+                print_warn(f'doubled key ID in DE trust list, only using last: {format_key_id(key_id)}')
 
             certs[key_id] = cert
 
@@ -665,7 +674,7 @@ def download_se_certs() -> CertList:
                         raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
                 if key_id in certs:
-                    print_err(f'doubled key ID in SE trust list, only using last: {format_key_id(key_id)}')
+                    print_warn(f'doubled key ID in SE trust list, only using last: {format_key_id(key_id)}')
 
                 certs[key_id] = cert
 
@@ -690,7 +699,7 @@ def download_covid_pass_verifier_certs() -> CertList:
                     raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
                 if key_id in certs:
-                    print_err(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
+                    print_warn(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
 
                 certs[key_id] = cert
         else:
@@ -719,7 +728,7 @@ def download_covid_pass_verifier_certs() -> CertList:
                 cert = HackCertificate(ec_pubkey, issuer, subject)
 
                 if key_id in certs:
-                    print_err(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
+                    print_warn(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
 
                 certs[key_id] = cert
 
@@ -733,7 +742,7 @@ def download_covid_pass_verifier_certs() -> CertList:
                 cert = HackCertificate(rsa_pubkey, issuer, subject)
 
                 if key_id in certs:
-                    print_err(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
+                    print_warn(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
 
                 certs[key_id] = cert
 
@@ -771,7 +780,7 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
                 # HackCertificate.fingerprint() is not implemented
 
                 if key_id in certs:
-                    print_err(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
+                    print_warn(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
 
                 certs[key_id] = cert
 
@@ -781,7 +790,7 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
                     raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
                 if key_id in certs:
-                    print_err(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
+                    print_warn(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
 
                 certs[key_id] = cert
 
@@ -973,7 +982,7 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
                 print_err(f'decoding NL trust list entry {key_id.hex()} / {key_id_b64}: {error}')
             else:
                 if key_id in certs:
-                    print_err(f'doubled key ID in NL trust list, only using last: {format_key_id(key_id)}')
+                    print_warn(f'doubled key ID in NL trust list, only using last: {format_key_id(key_id)}')
 
                 certs[key_id] = cert
     return certs
@@ -1057,7 +1066,7 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
                 print_err(f'decoding CH trust list entry {format_key_id(key_id)}: algorithm not supported: {alg!r}')
 
             if key_id in certs:
-                print_err(f'doubled key ID in CH trust list, only using last: {format_key_id(key_id)}')
+                print_warn(f'doubled key ID in CH trust list, only using last: {format_key_id(key_id)}')
 
             certs[key_id] = cert
 
@@ -1091,7 +1100,7 @@ def download_no_certs(token: Optional[str] = None) -> CertList:
         cert = load_hack_certificate_from_der_public_key(pubkey_der)
 
         if key_id in certs:
-            print_err(f'doubled key ID in NO trust list, only using last: {format_key_id(key_id)}')
+            print_warn(f'doubled key ID in NO trust list, only using last: {format_key_id(key_id)}')
 
         certs[key_id] = cert
 
@@ -1123,7 +1132,7 @@ def download_gb_certs() -> CertList:
             Name([NameAttribute(NameOID.COUNTRY_NAME, 'GB')]),
         )
         if key_id in certs:
-            print_err(f'doubled key ID in GB trust list, only using last: {format_key_id(key_id)}')
+            print_warn(f'doubled key ID in GB trust list, only using last: {format_key_id(key_id)}')
 
         certs[key_id] = cert
 
@@ -1810,6 +1819,9 @@ def main() -> None:
         'Load environment variables from FILE. Default is ".env". '
         'Set this to an empty string to not load environment varibles from a file.')
 
+    ap.add_argument('--fail-on-error', action='store_true', default=False, help='Turns every error into an exception.')
+    ap.add_argument('--warning-as-error', action='store_true', default=False, help='Turns every warning into an error.')
+
     ap.add_argument('--image', action='store_true', default=False, help='ehc_code is a path to an image file containing a QR-code.')
     ap.add_argument('ehc_code', nargs='*', help='Scanned EHC QR-code, or when --image is passed path to an image file.')
 
@@ -1901,6 +1913,11 @@ def main() -> None:
         print('Report issues to: https://github.com/panzi/verify-ehc/issues')
 
         return
+
+    global FAIL_ON_ERROR, WARNING_AS_ERROR
+
+    FAIL_ON_ERROR    = args.fail_on_error
+    WARNING_AS_ERROR = args.warning_as_error
 
     if args.envfile:
         try:
