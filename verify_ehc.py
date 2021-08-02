@@ -799,43 +799,41 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
 
     return certs
 
-def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert: x509.Certificate) -> bool:
-    content_info = asn1crypto.cms.ContentInfo.load(signature)
-    content = content_info['content']
-    cert_set = content['certificates']
+def build_trust_chain(certs: List[x509.Certificate]) -> Dict[bytes, x509.Certificate]:
+    trustchain: Dict[bytes, x509.Certificate] = {}
 
-    trustchain: List[x509.Certificate] = []
-    for asn1cert in cert_set:
-        if asn1cert.name == 'certificate':
-            trustchain.append(load_der_x509_certificate(asn1cert.chosen.dump()))
-        else:
-            raise NotImplementedError(f'Certificate option in trust chain not supported: {asn1cert.name}')
+    for cert in certs:
+        subject_key_id = cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
+        trustchain[subject_key_id] = cert
 
-    trustchain.reverse()
+    return trustchain
 
-    first_cert = trustchain[-1]
-    if root_cert != first_cert:
-        try:
-            subject_key_id = first_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
-        except ExtensionNotFound:
-            subject_key_id_str = 'N/A'
-        else:
-            subject_key_id_str = ':'.join('%02X' % x for x in subject_key_id)
-
-        fingerprint = first_cert.fingerprint(hashes.SHA256())
-        fingerprint_str = ':'.join('%02X' % x for x in fingerprint)
-        print_err(f'Trust chain has unexpected root certificate.\n'
-                  f'fingerprint: {fingerprint_str}\n'
-                  f'subject key ID: {subject_key_id_str}')
-        return False
-
-    # just to be sure that there is no trickery:
-    trustchain[-1] = root_cert
-
+def verify_trust_chain(cert: x509.Certificate, trustchain: Dict[bytes, x509.Certificate], root_cert: x509.Certificate) -> bool:
+    signed_cert = cert
     rsa_padding = PKCS1v15()
-    for index in range(len(trustchain) - 1):
-        signed_cert = trustchain[index]
-        issuer_cert = trustchain[index + 1]
+    root_subject_key_id = root_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
+
+    while signed_cert is not root_cert:
+        auth_key_id = signed_cert.extensions.get_extension_for_oid(ExtensionOID.AUTHORITY_KEY_IDENTIFIER).value.key_identifier
+
+        issuer_cert: Optional[x509.Certificate]
+        if root_subject_key_id == auth_key_id:
+            issuer_cert = root_cert
+        else:
+            issuer_cert = trustchain.get(auth_key_id)
+
+            if issuer_cert == root_cert:
+                # just to be sure that there is no trickery:
+                issuer_cert = root_cert
+
+        if issuer_cert is None:
+            auth_key_id_str = ':'.join('%02X' % x for x in auth_key_id)
+            fingerprint = signed_cert.fingerprint(hashes.SHA256())
+            fingerprint_str = ':'.join('%02X' % x for x in fingerprint)
+            print_err(f'Could not verify signature of a certificate in the trust chain.\n'
+                      f'fingerprint: {fingerprint_str}\n'
+                      f'authority key ID: {auth_key_id_str}')
+            return False
 
         pubkey = issuer_cert.public_key()
         try:
@@ -871,9 +869,50 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
                       f'subject key ID: {subject_key_id_str}')
             return False
 
-    last_cert = trustchain[0]
-    pubkey = last_cert.public_key()
+        signed_cert = issuer_cert
+
+    return True
+
+def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert: x509.Certificate) -> bool:
+    content_info = asn1crypto.cms.ContentInfo.load(signature)
+    content = content_info['content']
+    cert_set = content['certificates']
+
+    certs: List[x509.Certificate] = []
+    for asn1cert in cert_set:
+        if asn1cert.name == 'certificate':
+            certs.append(load_der_x509_certificate(asn1cert.chosen.dump()))
+        else:
+            raise NotImplementedError(f'Certificate option in trust chain not supported: {asn1cert.name}')
+
+    trustchain = build_trust_chain(certs)
+
+    certs_by_serial: Optional[Dict[int, x509.Certificate]] = None
+
     for signer_info in content['signer_infos']:
+        sid = signer_info['sid']
+        if sid.name == 'issuer_and_serial_number':
+            if certs_by_serial is None:
+                # lazily create this mapping only if needed
+                certs_by_serial = {}
+                for cert in certs:
+                    serial_number = cert.serial_number
+
+                    if serial_number in certs_by_serial:
+                        raise ValueError(f'Doubled serial number in trust chain: {serial_number}')
+
+                    certs_by_serial[serial_number] = cert
+
+            serial_number = sid.chosen['serial_number'].native
+            cert = certs_by_serial[serial_number]
+        elif sid.name == 'subject_key_identifier':
+            cert = trustchain[sid.chosen.native]
+
+        if not verify_trust_chain(cert, trustchain, root_cert):
+            return False
+
+        pubkey = cert.public_key()
+
         digest_algo = signer_info['digest_algorithm']['algorithm'].native
         digest = hashlib.new(digest_algo, payload).digest()
 
@@ -914,7 +953,7 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
                 pubkey.verify(
                     sign,
                     signed_data,
-                    rsa_padding,
+                    PKCS1v15(),
                     HASH_ALGORITHMS[digest_algo](), # type: ignore
                 )
             elif isinstance(pubkey, EllipticCurvePublicKey):
