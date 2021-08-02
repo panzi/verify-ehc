@@ -815,9 +815,10 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
 
         fingerprint = first_cert.fingerprint(hashes.SHA256())
         fingerprint_str = ':'.join('%02X' % x for x in fingerprint)
-        raise ValueError(f'Trust chain has unexpected root certificate.\n'
-                         f'fingerprint: {fingerprint_str}\n'
-                         f'subject key ID: {subject_key_id_str}')
+        print_err(f'Trust chain has unexpected root certificate.\n'
+                  f'fingerprint: {fingerprint_str}\n'
+                  f'subject key ID: {subject_key_id_str}')
+        return False
 
     # just to be sure that there is no trickery:
     trustchain[-1] = root_cert
@@ -856,9 +857,10 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
 
             fingerprint = signed_cert.fingerprint(hashes.SHA256())
             fingerprint_str = ':'.join('%02X' % x for x in fingerprint)
-            raise ValueError(f'Could not verify signature of a certificate in the trust chain.\n'
-                             f'fingerprint: {fingerprint_str}\n'
-                             f'subject key ID: {subject_key_id_str}')
+            print_err(f'Could not verify signature of a certificate in the trust chain.\n'
+                      f'fingerprint: {fingerprint_str}\n'
+                      f'subject key ID: {subject_key_id_str}')
+            return False
 
     last_cert = trustchain[0]
     pubkey = last_cert.public_key()
@@ -878,9 +880,10 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
                     for msg_digest in signed_attr['values'].native:
                         has_message_digest = True
                         if digest != msg_digest:
-                            raise ValueError(f'Payload digest missmatch.\n'
-                                             f'expected: {msg_digest.hex()}\n'
-                                             f'actual: {digest.hex()}')
+                            print_err(f'Payload digest missmatch.\n'
+                                      f'expected: {msg_digest.hex()}\n'
+                                      f'actual: {digest.hex()}')
+                            return False
 
             if not has_message_digest:
                 raise ValueError(f'Message digest signed attribute is missing.')
