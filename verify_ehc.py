@@ -913,7 +913,7 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
                 )
             else:
                 pubkey_type = type(pubkey)
-                raise NotImplementedError(f'uUnsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+                raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
         except InvalidSignature:
             return False
