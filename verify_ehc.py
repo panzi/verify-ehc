@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Tuple, Any, Dict, Optional, List, FrozenSet, Union, Type, Callable
+from typing import Tuple, Any, Dict, Optional, List, FrozenSet, Union, Type, Callable, Set
 
 import json
 import sys
@@ -812,9 +812,14 @@ def verify_trust_chain(cert: x509.Certificate, trustchain: Dict[bytes, x509.Cert
     signed_cert = cert
     rsa_padding = PKCS1v15()
     root_subject_key_id = root_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
+    visited: Set[bytes] = set()
 
     while signed_cert is not root_cert:
         auth_key_id = signed_cert.extensions.get_extension_for_oid(ExtensionOID.AUTHORITY_KEY_IDENTIFIER).value.key_identifier
+
+        if auth_key_id in visited:
+            raise ValueError('loop in trust chain detected')
+        visited.add(auth_key_id)
 
         issuer_cert: Optional[x509.Certificate]
         if root_subject_key_id == auth_key_id:
