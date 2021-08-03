@@ -371,7 +371,7 @@ def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
                 cert = HackCertificate(pubkey, not_valid_before=not_valid_before, not_valid_after=not_valid_after)
             else:
                 pubkey_type = type(pubkey)
-                raise TypeError(f'unhandeled public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+                raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
         if key_id in certs:
             print_warn(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
@@ -1381,7 +1381,7 @@ def load_jwt(token: bytes, root_cert: x509.Certificate, options: Optional[Dict[s
             )
         else:
             pubkey_type = type(pubkey)
-            raise ValueError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+            raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
     pubkey = trustchain[0].public_key()
     sigkey: jwk.Key
@@ -1409,7 +1409,7 @@ def load_jwt(token: bytes, root_cert: x509.Certificate, options: Optional[Dict[s
         })
     else:
         pubkey_type = type(pubkey)
-        raise ValueError(f'unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+        raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
     return jwt.decode(token, key=sigkey, options=options)
 
@@ -1427,7 +1427,7 @@ def load_hack_certificate_from_der_public_key(data: bytes,
         return HackCertificate(pubkey, issuer, subject, not_valid_before, not_valid_after)
     else:
         pubkey_type = type(pubkey)
-        raise TypeError(f'unhandeled public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+        raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
 def b64decode_ignore_padding(b64str: str) -> bytes:
     return b64decode(b64str + "=" * ((4 - len(b64str) % 4) % 4))
@@ -1535,7 +1535,7 @@ def cert_to_cose_key(cert: x509.Certificate) -> CoseKey:
         curve = COSE_CURVES.get(curve_name)
 
         if not curve:
-            raise KeyError(f'Unsupported curve: {pk.curve.name}')
+            raise NotImplementedError(f'Unsupported curve: {pk.curve.name}')
 
         return CoseKey.from_dict(
             {
@@ -1569,7 +1569,8 @@ def cert_to_cose_key(cert: x509.Certificate) -> CoseKey:
     #        }
     #    )
     else:
-        raise KeyError(f'Unsupported public key type: {type(pk).__name__}')
+        pk_type = type(pk)
+        raise NotImplementedError(f'Unsupported public key type: {pk_type.__module__}.{pk_type.__name__}')
 
 crl_status: Dict[str, int] = {}
 crls: Dict[str, x509.CertificateRevocationList] = {}
