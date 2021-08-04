@@ -59,6 +59,22 @@ from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 # Digital Green Certificate Gateway API SPEC: https://eu-digital-green-certificates.github.io/dgc-gateway/#/Trust%20Lists/downloadTrustList
 # But where is it hosted?
 
+# Extended Key Usage OIDs:
+VALID_FOR_TEST        = ObjectIdentifier('1.3.6.1.4.1.1847.2021.1.1')
+VALID_FOR_VACCINATION = ObjectIdentifier('1.3.6.1.4.1.1847.2021.1.2')
+VALID_FOR_RECOVERY    = ObjectIdentifier('1.3.6.1.4.1.1847.2021.1.3')
+
+EXT_KEY_USAGE_NAMES: Dict[ObjectIdentifier, str] = {
+    VALID_FOR_TEST:        'test',
+    VALID_FOR_VACCINATION: 'vaccination',
+    VALID_FOR_RECOVERY:    'recovery',
+
+    # these are bugs in some X.509 certificates:
+    ObjectIdentifier('1.3.6.1.4.1.0.1847.2021.1.1'): 'test',
+    ObjectIdentifier('1.3.6.1.4.1.0.1847.2021.1.2'): 'vaccination',
+    ObjectIdentifier('1.3.6.1.4.1.0.1847.2021.1.3'): 'recovery',
+}
+
 FAIL_ON_ERROR = False
 WARNING_AS_ERROR = False
 
@@ -141,7 +157,7 @@ OLD_CERTS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/listv2'
 OLD_SIGNS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/sigv2'
 
 # Trust List used by Austrian greencheck app:
-CERTS_URL_AT = 'https://greencheck.gv.at/api/masterdata'
+CERTS_URL_AT_GREENCHECK = 'https://greencheck.gv.at/api/masterdata'
 
 CERTS_URL_AT_PROD = 'https://dgc-trust.qr.gv.at/trustlist'
 SIGN_URL_AT_PROD  = 'https://dgc-trust.qr.gv.at/trustlistsig'
@@ -149,7 +165,10 @@ SIGN_URL_AT_PROD  = 'https://dgc-trust.qr.gv.at/trustlistsig'
 CERTS_URL_AT_TEST = 'https://dgc-trusttest.qr.gv.at/trustlist'
 SIGN_URL_AT_TEST  = 'https://dgc-trusttest.qr.gv.at/trustlistsig'
 
+# only used for root kec extraction from greencheck JavaScript:
 ROOT_CERT_KEY_ID_AT = b'\xe0\x9f\xf7\x8f\x02R\x06\xb6'
+
+# See: https://github.com/Federal-Ministry-of-Health-AT/green-pass-overview
 # These root certs are copied from some presentation slides.
 # TODO: Link a proper source here once it becomes available?
 #
@@ -510,8 +529,8 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
 
     return certs
 
-def download_at_certs() -> CertList:
-    response = requests.get(CERTS_URL_AT, headers={'User-Agent': USER_AGENT})
+def download_at_greencheck_certs() -> CertList:
+    response = requests.get(CERTS_URL_AT_GREENCHECK, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
     certs_json = json.loads(response.content)['trustList']
     certs_cbor = b64decode(certs_json['trustListContent'])
@@ -526,7 +545,7 @@ def download_at_certs() -> CertList:
     root_cert: Optional[x509.Certificate] = None
 
     try:
-        root_cert = get_at_root_cert(root_cert_key_id)
+        root_cert = get_at_greencheck_root_cert(root_cert_key_id)
     except (BaseHTTPError, ValueError, KeyError) as error:
         print_err(f'AT trust list error (NOT VALIDATING): {error}')
 
@@ -559,7 +578,7 @@ def download_at_certs() -> CertList:
 
     return load_ehc_certs_cbor(certs_cbor, 'AT')
 
-def download_at_certs_new(test: bool = False, token: Optional[str] = None) -> CertList:
+def download_at_certs(test: bool = False, token: Optional[str] = None) -> CertList:
     # TODO: update to handle tokens once required
     #if token is None:
     #    token = os.getenv('AT_TOKEN')
@@ -575,7 +594,7 @@ def download_at_certs_new(test: bool = False, token: Optional[str] = None) -> Ce
     else:
         certs_url = CERTS_URL_AT_PROD
         sign_url  = SIGN_URL_AT_PROD
-        root_cert = get_root_cert('AT-NEW')
+        root_cert = get_root_cert('AT')
 
     response = requests.get(certs_url, headers={'User-Agent': USER_AGENT})
     #response = requests.get(certs_url, headers={
@@ -1183,9 +1202,9 @@ def download_gb_certs() -> CertList:
     return certs
 
 DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
-    'AT':              download_at_certs,     # will be 'AT-greencheck' or just removed in future
-    'AT-NEW':          download_at_certs_new, # will be just 'AT' in future
-    'AT-TEST': lambda: download_at_certs_new(test=True),
+    'AT-GREENCHECK':   download_at_greencheck_certs,
+    'AT':              download_at_certs,
+    'AT-TEST': lambda: download_at_certs(test=True),
     'CH': download_ch_certs,
     'DE': download_de_certs,
     'FR': download_fr_certs,
@@ -1214,7 +1233,7 @@ def download_ehc_certs(sources: List[str], certs_table: Dict[str, CertList] = {}
 
     return certs
 
-def get_at_root_cert(root_cert_key_id: bytes = ROOT_CERT_KEY_ID_AT) -> x509.Certificate:
+def get_at_greencheck_root_cert(root_cert_key_id: bytes = ROOT_CERT_KEY_ID_AT) -> x509.Certificate:
     # TODO: Find out another place where to get the AT root certificate from.
     #       This gets it from the same server as the trust list itself, which is suboptimal.
 
@@ -1246,7 +1265,7 @@ def get_at_root_cert(root_cert_key_id: bytes = ROOT_CERT_KEY_ID_AT) -> x509.Cert
 
     raise KeyError(f'AT certificate with key ID {format_key_id(root_cert_key_id)} not found!')
 
-def get_at_new_root_cert() -> x509.Certificate:
+def get_at_root_cert() -> x509.Certificate:
     return load_pem_x509_certificate(ROOT_CERT_AT_PROD)
 
 def get_at_test_root_cert() -> x509.Certificate:
@@ -1291,13 +1310,13 @@ def get_ch_root_cert(token: Optional[str] = None) -> x509.Certificate:
     return load_pem_x509_certificate(response.content)
 
 ROOT_CERT_DOWNLOADERS: Dict[str, Callable[[], x509.Certificate]] = {
-    'AT':      get_at_root_cert,
-    'AT-NEW':  get_at_new_root_cert,
-    'AT-TEST': get_at_test_root_cert,
-    'DE':      get_de_root_cert, # actually just a public key
-    'NL':      get_nl_root_cert,
-    'SE':      get_se_root_cert,
-    'CH':      get_ch_root_cert,
+    'AT-GREENCHECK': get_at_greencheck_root_cert,
+    'AT':            get_at_root_cert,
+    'AT-TEST':       get_at_test_root_cert,
+    'DE':            get_de_root_cert, # actually just a public key
+    'NL':            get_nl_root_cert,
+    'SE':            get_se_root_cert,
+    'CH':            get_ch_root_cert,
 }
 
 def get_root_cert(source: str) -> x509.Certificate:
@@ -1474,22 +1493,13 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
 
     # TODO: warn if key_id is in uhdr (unprotected header)?
     key_id = msg.phdr.get(KID) or msg.uhdr[KID]
-    print(f'Key ID         : {format_key_id(key_id)}')
 
     cert = certs.get(key_id) # XXX: is this correct? is it not two levels of signed certificates?
     if not cert:
         raise KeyError(f'Key ID not found in trust list: {key_id.hex()}')
 
-    pk = cert.public_key()
-    print(f'Key Type       : {type(pk).__name__.strip("_")}')
-    if not isinstance(cert, HackCertificate):
-        print(f'Cert Serial Nr.: {":".join("%02x" % byte for byte in cert.serial_number.to_bytes(20, byteorder="big"))}')
-    print(f'Cert Issuer    : {cert.issuer.rfc4514_string()}')
-    print(f'Cert Subject   : {cert.subject.rfc4514_string()}')
-    print(f'Cert Version   : {cert.version.name}')
-    print( 'Cert Valid In  :',
-        cert.not_valid_before.isoformat() if cert.not_valid_before is not None else 'N/A', '-',
-        cert.not_valid_after.isoformat()  if cert.not_valid_after  is not None else 'N/A')
+    print('X.509 Certificate:')
+    print_cert(key_id, cert, print_exts, indent='  ')
 
     cert_expired = False
     if cert.not_valid_before is not None and issued_at < cert.not_valid_before:
@@ -1498,34 +1508,52 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
     if cert.not_valid_after is not None and issued_at > cert.not_valid_after:
         cert_expired = True
 
-    print(f'Cert Expired   : {cert_expired}')
+    print(f'  Cert Expired   : {cert_expired}')
     revoked_cert = get_revoked_cert(cert)
     if revoked_cert:
-        print( 'Cert Revoked At:', revoked_cert.revocation_date.isoformat())
+        print(f'Cert Revoked At: {revoked_cert.revocation_date.isoformat()}')
         revoked = True
     else:
         revoked = False
-
-    if not isinstance(cert, HackCertificate):
-        signature_algorithm_oid = cert.signature_algorithm_oid
-        print(f'Signature Algo.: oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
-        print( 'Cert Signature :', b64encode(cert.signature).decode('ASCII'))
-
-    if isinstance(pk, EllipticCurvePublicKey):
-        print(f'Curve          : {pk.curve.name}')
 
     msg.key = cert_to_cose_key(cert)
 
     valid = msg.verify_signature()
 
+    usage: Set[str] = set()
+    try:
+        ext_key_usage = cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE)
+    except ExtensionNotFound:
+        pass
+    else:
+        for oid in ext_key_usage.value:
+            usage_name = EXT_KEY_USAGE_NAMES.get(oid)
+            if usage_name is not None:
+                usage.add(usage_name)
+
+    if not usage:
+        usage = {'test', 'vaccination', 'recovery'}
+
+    ehc_payload = cbor2.loads(msg.payload)
+    ehc = ehc_payload[-260][1]
+
+    usage_valid = True
+    if 'v' in ehc:
+        if 'vaccination' not in usage:
+            usage_valid = False
+
+    if 't' in ehc:
+        if 'test' not in usage:
+            usage_valid = False
+
+    if 'r' in ehc:
+        if 'recovery' not in usage:
+            usage_valid = False
+
+    print(f'Valid Key Usage: {usage_valid}')
     print(f'Signature Valid: {valid}')
 
-    if print_exts and cert.extensions:
-        print('Extensions     :')
-        for ext in cert.extensions:
-            print(f'- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
-
-    return valid and not cert_expired and not revoked
+    return valid and not cert_expired and not revoked and usage_valid
 
 def cert_to_cose_key(cert: x509.Certificate) -> CoseKey:
     pk = cert.public_key()
@@ -1811,6 +1839,58 @@ def print_table(header: List[str], align: List[Align], body: List[List[str]]) ->
     for row in body:
         print(' | '.join(alignment.align(cell, width) for alignment, cell, width in zip(align, row, widths)).rstrip())
 
+def print_cert(key_id: bytes, cert: x509.Certificate, print_exts: bool = False, revoked_certs: Optional[Dict[bytes, x509.RevokedCertificate]] = None, indent: Union[str, int]='') -> None:
+    if isinstance(indent, int):
+        indent = ' ' * indent
+
+    print(f'{indent}Key ID          :', format_key_id(key_id))
+    if not isinstance(cert, HackCertificate):
+        print(f'{indent}Serial Nr.      :', ":".join("%02x" % byte for byte in cert.serial_number.to_bytes(20, byteorder="big")))
+    print(f'{indent}Issuer          :', cert.issuer.rfc4514_string())
+    print(f'{indent}Subject         :', cert.subject.rfc4514_string())
+    print(f'{indent}Valid Date Range:',
+        cert.not_valid_before.isoformat() if cert.not_valid_before is not None else 'N/A', '-',
+        cert.not_valid_after.isoformat()  if cert.not_valid_after  is not None else 'N/A')
+    print(f'{indent}Version         :', cert.version.name)
+
+    usage: Set[str] = set()
+    try:
+        ext_key_usage = cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE)
+    except ExtensionNotFound:
+        pass
+    else:
+        for oid in ext_key_usage.value:
+            usage_name = EXT_KEY_USAGE_NAMES.get(oid)
+            if usage_name is None:
+                print_warn(f'Unexpected extened key usage: {oid.dotted_string} ({oid._name})')
+            else:
+                usage.add(usage_name)
+
+    if not usage:
+        usage = {'test', 'vaccination', 'recovery'}
+
+    print(f'{indent}Ext. Key Usage  : {", ".join(sorted(usage))}')
+
+    pk = cert.public_key()
+    print(f'{indent}Key Type        : {type(pk).__name__.strip("_")}')
+    if isinstance(pk, EllipticCurvePublicKey):
+        print(f'{indent}Curve           :', pk.curve.name)
+
+    if not isinstance(cert, HackCertificate):
+        signature_algorithm_oid = cert.signature_algorithm_oid
+        print(f'{indent}Signature Algo. : oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
+        print(f'{indent}Signature       :', b64encode(cert.signature).decode('ASCII'))
+
+    if revoked_certs is not None:
+        revoked_cert = revoked_certs.get(key_id)
+        if revoked_cert:
+            print(f'{indent}Revoked At      :', revoked_cert.revocation_date.isoformat())
+
+    if print_exts and cert.extensions:
+        print(f'{indent}Extensions      :')
+        for ext in cert.extensions:
+            print(f'{indent}- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
+
 def main() -> None:
     ap = argparse.ArgumentParser(formatter_class=SmartFormatter, add_help=False)
 
@@ -2070,37 +2150,11 @@ def main() -> None:
                     revoked = True
 
         if args.list_certs:
+            revoked_certs_for_print: Optional[Dict[bytes, x509.RevokedCertificate]] = revoked_certs if args.strip_revoked else None
             for key_id, cert in items:
-                print('Key ID          :', format_key_id(key_id))
-                if not isinstance(cert, HackCertificate):
-                    print('Serial Nr.      :', ":".join("%02x" % byte for byte in cert.serial_number.to_bytes(20, byteorder="big")))
-                print('Issuer          :', cert.issuer.rfc4514_string())
-                print('Subject         :', cert.subject.rfc4514_string())
-                print('Valid Date Range:',
-                    cert.not_valid_before.isoformat() if cert.not_valid_before is not None else 'N/A', '-',
-                    cert.not_valid_after.isoformat()  if cert.not_valid_after  is not None else 'N/A')
-                print('Version         :', cert.version.name)
-
-                pk = cert.public_key()
-                print(f'Key Type        : {type(pk).__name__.strip("_")}')
-                if isinstance(pk, EllipticCurvePublicKey):
-                    print( 'Curve           :', pk.curve.name)
-
-                if not isinstance(cert, HackCertificate):
-                    signature_algorithm_oid = cert.signature_algorithm_oid
-                    print(f'Signature Algo. : oid={signature_algorithm_oid.dotted_string}, name={signature_algorithm_oid._name}')
-                    print( 'Signature       :', b64encode(cert.signature).decode('ASCII'))
-
-                if args.strip_revoked:
-                    revoked_cert = revoked_certs.get(key_id)
-                    if revoked_cert:
-                        print('Revoked At      :', revoked_cert.revocation_date.isoformat())
-
-                if args.print_exts and cert.extensions:
-                    print('Extensions      :')
-                    for ext in cert.extensions:
-                        print(f'- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
-
+                print_cert(key_id, cert,
+                    print_exts=args.print_exts,
+                    revoked_certs=revoked_certs_for_print)
                 print()
 
         if args.strip_revoked:
