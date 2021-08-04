@@ -41,8 +41,8 @@ from cose.messages import CoseMessage, Sign1Message # type: ignore
 from cose.algorithms import Ps256, Es256
 
 from cryptography import x509
-from cryptography.x509 import load_der_x509_certificate, load_pem_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, RelativeDistinguishedName, NameAttribute, Version, Extensions
-from cryptography.x509.extensions import ExtensionNotFound
+from cryptography.x509 import load_der_x509_certificate, load_pem_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, RelativeDistinguishedName, NameAttribute, Version, Extensions, Extension
+from cryptography.x509.extensions import ExtensionNotFound, ExtendedKeyUsage
 from cryptography.x509.name import _NAMEOID_TO_NAME
 from cryptography.x509.oid import NameOID, ObjectIdentifier, SignatureAlgorithmOID, ExtensionOID
 from cryptography.exceptions import InvalidSignature
@@ -73,6 +73,12 @@ EXT_KEY_USAGE_NAMES: Dict[ObjectIdentifier, str] = {
     ObjectIdentifier('1.3.6.1.4.1.0.1847.2021.1.1'): 'test',
     ObjectIdentifier('1.3.6.1.4.1.0.1847.2021.1.2'): 'vaccination',
     ObjectIdentifier('1.3.6.1.4.1.0.1847.2021.1.3'): 'recovery',
+}
+
+EXT_KEY_USAGE_OIDS: Dict[str, ObjectIdentifier] = {
+    'test':        VALID_FOR_TEST,
+    'vaccination': VALID_FOR_VACCINATION,
+    'recovery':    VALID_FOR_RECOVERY,
 }
 
 FAIL_ON_ERROR = False
@@ -274,11 +280,12 @@ class HackCertificate(x509.Certificate):
         subject: Optional[Name] = None,
         not_valid_before: datetime = DEFAULT_NOT_VALID_BEFORE,
         not_valid_after:  datetime = DEFAULT_NOT_VALID_AFTER,
+        extensions: Optional[Extensions] = None,
     ):
         self._public_key = public_key
         self._issuer  = issuer  if issuer  is not None else Name([])
         self._subject = subject if subject is not None else Name([])
-        self._extensions = Extensions([])
+        self._extensions = extensions if extensions is not None else Extensions([])
         self._not_valid_before = not_valid_before
         self._not_valid_after  = not_valid_after
 
@@ -426,6 +433,16 @@ def load_hack_certs_json(data: bytes, source: str) -> CertList:
 
         pubkey_dict = cert_dict['publicKey']
 
+        usage = cert_dict.get('usage')
+        exts: List[Extension] = []
+        if usage is not None:
+            usage_oids: List[ObjectIdentifier] = []
+            for use in usage:
+                oid = EXT_KEY_USAGE_OIDS[use]
+                usage_oids.append(oid)
+            exts.append(Extension(ExtensionOID.EXTENDED_KEY_USAGE, False, ExtendedKeyUsage(usage_oids)))
+        extensions = Extensions(exts)
+
         key_id = urlsafe_b64decode_ignore_padding(pubkey_dict['kid'])
         key_type = pubkey_dict['kty']
 
@@ -442,7 +459,7 @@ def load_hack_certs_json(data: bytes, source: str) -> CertList:
             y = int.from_bytes(y_bytes, byteorder="big", signed=False)
 
             ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
-            cert = HackCertificate(ec_pubkey, issuer, subject, not_valid_before, not_valid_after)
+            cert = HackCertificate(ec_pubkey, issuer, subject, not_valid_before, not_valid_after, extensions=extensions)
 
             if key_id in certs:
                 print_warn(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
@@ -456,7 +473,7 @@ def load_hack_certs_json(data: bytes, source: str) -> CertList:
             n = int.from_bytes(n_bytes, byteorder="big", signed=False)
 
             rsa_pubkey = RSAPublicNumbers(e, n).public_key()
-            cert = HackCertificate(rsa_pubkey, issuer, subject, not_valid_before, not_valid_after)
+            cert = HackCertificate(rsa_pubkey, issuer, subject, not_valid_before, not_valid_after, extensions=extensions)
 
             if key_id in certs:
                 print_warn(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
@@ -1105,6 +1122,22 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
         key_id = b64decode(pub['keyId']) # type: ignore
         if key_id in active_key_ids:
             alg = pub['alg']
+            usage: str = pub.get('use', 'tvr') # type: ignore
+            usages: List[ObjectIdentifier] = []
+            if usage != 'sig':
+                if 't' in usage:
+                    usages.append(VALID_FOR_TEST)
+
+                if 'v' in usage:
+                    usages.append(VALID_FOR_VACCINATION)
+
+                if 'r' in usage:
+                    usages.append(VALID_FOR_RECOVERY)
+            exts: List[Extension] = []
+            if usages:
+                exts.append(Extension(ExtensionOID.EXTENDED_KEY_USAGE, False, ExtendedKeyUsage(usages)))
+            extensions = Extensions(exts)
+
             if alg == 'ES256':
                 # EC
                 x_bytes = b64decode(pub['x']) # type: ignore
@@ -1114,7 +1147,7 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
                 crv: str = pub['crv'] # type: ignore
                 curve = NIST_CURVES[crv]()
                 ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
-                cert = HackCertificate(ec_pubkey)
+                cert = HackCertificate(ec_pubkey, extensions=extensions)
 
             elif alg == 'RS256':
                 # RSA
@@ -1123,7 +1156,7 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
                 e = int.from_bytes(e_bytes, byteorder="big", signed=False)
                 n = int.from_bytes(n_bytes, byteorder="big", signed=False)
                 rsa_pubkey = RSAPublicNumbers(e, n).public_key()
-                cert = HackCertificate(rsa_pubkey)
+                cert = HackCertificate(rsa_pubkey, extensions=extensions)
 
             else:
                 print_err(f'decoding CH trust list entry {format_key_id(key_id)}: algorithm not supported: {alg!r}')
@@ -1519,20 +1552,7 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
     msg.key = cert_to_cose_key(cert)
 
     valid = msg.verify_signature()
-
-    usage: Set[str] = set()
-    try:
-        ext_key_usage = cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE)
-    except ExtensionNotFound:
-        pass
-    else:
-        for oid in ext_key_usage.value:
-            usage_name = EXT_KEY_USAGE_NAMES.get(oid)
-            if usage_name is not None:
-                usage.add(usage_name)
-
-    if not usage:
-        usage = {'test', 'vaccination', 'recovery'}
+    usage = get_key_usage(cert)
 
     ehc_payload = cbor2.loads(msg.payload)
     ehc = ehc_payload[-260][1]
@@ -1722,6 +1742,7 @@ def save_certs(certs: CertList, certs_path: str, allow_public_key_only: bool = F
                 'notValidAfter':  cert.not_valid_after.isoformat(),
                 'publicKey': pubkey_json,
                 'algorithm': algo,
+                'usage': sorted(get_key_usage(cert)),
             }
 
             certs_json[key_id.hex()] = cert_json
@@ -1838,6 +1859,23 @@ def print_table(header: List[str], align: List[Align], body: List[List[str]]) ->
 
     for row in body:
         print(' | '.join(alignment.align(cell, width) for alignment, cell, width in zip(align, row, widths)).rstrip())
+
+def get_key_usage(cert: x509.Certificate) -> Set[str]:
+    usage: Set[str] = set()
+    try:
+        ext_key_usage = cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE)
+    except ExtensionNotFound:
+        pass
+    else:
+        for oid in ext_key_usage.value:
+            usage_name = EXT_KEY_USAGE_NAMES.get(oid)
+            if usage_name is not None:
+                usage.add(usage_name)
+
+    if not usage:
+        usage = {'test', 'vaccination', 'recovery'}
+
+    return usage
 
 def print_cert(key_id: bytes, cert: x509.Certificate, print_exts: bool = False, revoked_certs: Optional[Dict[bytes, x509.RevokedCertificate]] = None, indent: Union[str, int]='') -> None:
     if isinstance(indent, int):

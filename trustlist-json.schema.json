@@ -23,7 +23,8 @@
                     "notValidBefore",
                     "notValidAfter",
                     "publicKey",
-                    "algorithm"
+                    "algorithm",
+                    "usage"
                 ],
                 "properties": {
                     "issuer": {
@@ -129,6 +130,18 @@
                                 "type": "string",
                                 "format": "urlsafe-base64"
                             }
+                        }
+                    },
+                    "usage": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "test",
+                                "vaccination",
+                                "recovery"
+                            ],
+                            "example": "test"
                         }
                     }
                 }
