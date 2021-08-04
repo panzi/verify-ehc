@@ -101,6 +101,8 @@ JS_CERT_PATTERN = re.compile(r"'({[^-']*-----BEGIN[^']*)'")
 ESC = re.compile(r'\\x([0-9a-fA-F][0-9a-fA-F])')
 CURVE_NAME_IGNORE = re.compile(r'[-_ ]')
 
+MD_CERT_PATTERN = re.compile(r'(?P<url>https://[^()\s]+)[^-:]*(?P<cert>-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----\r?\n?)')
+
 # https://tools.ietf.org/search/rfc4492#appendix-A
 COSE_CURVES: Dict[str, Type[CoseCurve]] = {
     'secp256r1':  P256,
@@ -1298,6 +1300,27 @@ def get_at_greencheck_root_cert(root_cert_key_id: bytes = ROOT_CERT_KEY_ID_AT) -
 
     raise KeyError(f'AT certificate with key ID {format_key_id(root_cert_key_id)} not found!')
 
+def get_at_github_root_cert(test: bool = False) -> x509.Certificate:
+    response = requests.get('https://raw.githubusercontent.com/Federal-Ministry-of-Health-AT/green-pass-overview/main/README.md', headers={'User-Agent': USER_AGENT})
+    response.raise_for_status()
+
+    text = response.content.decode(response.encoding or 'UTF-8')
+
+    certs: Dict[str, x509.Certificate] = {}
+    for url, cert_data in MD_CERT_PATTERN.findall(text):
+        cert = load_pem_x509_certificate(cert_data.encode('UTF-8'))
+        certs[url] = cert
+
+    if test:
+        res_cert = certs.get('https://dgc-trusttest.qr.gv.at') or certs.get('https://dgc-trusttest.gv.at')
+    else:
+        res_cert = certs.get('https://dgc-trust.qr.gv.at')
+
+    if res_cert is None:
+        raise KeyError(f'AT {"testing" if test else "production"} root certificate not found!')
+
+    return res_cert
+
 def get_at_root_cert() -> x509.Certificate:
     return load_pem_x509_certificate(ROOT_CERT_AT_PROD)
 
@@ -1343,13 +1366,15 @@ def get_ch_root_cert(token: Optional[str] = None) -> x509.Certificate:
     return load_pem_x509_certificate(response.content)
 
 ROOT_CERT_DOWNLOADERS: Dict[str, Callable[[], x509.Certificate]] = {
-    'AT-GREENCHECK': get_at_greencheck_root_cert,
-    'AT':            get_at_root_cert,
-    'AT-TEST':       get_at_test_root_cert,
-    'DE':            get_de_root_cert, # actually just a public key
-    'NL':            get_nl_root_cert,
-    'SE':            get_se_root_cert,
-    'CH':            get_ch_root_cert,
+    'AT-GREENCHECK':  get_at_greencheck_root_cert,
+    'AT':             get_at_root_cert,
+    'AT-TEST':        get_at_test_root_cert,
+    'AT-GITHUB':      get_at_github_root_cert,
+    'AT-TEST-GITHUB': lambda: get_at_github_root_cert(test=True),
+    'DE':             get_de_root_cert, # actually just a public key
+    'NL':             get_nl_root_cert,
+    'SE':             get_se_root_cert,
+    'CH':             get_ch_root_cert,
 }
 
 def get_root_cert(source: str) -> x509.Certificate:
