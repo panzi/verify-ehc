@@ -377,34 +377,38 @@ def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
     certs_data = cbor2.loads(cbor_data)
     certs: CertList = {}
     for item in certs_data['c']:
-        key_id = item['i']
+        try:
+            key_id = item['i']
+            cert_data = item.get('c')
 
-        cert_data = item.get('c')
-        if cert_data:
-            cert = load_der_x509_certificate(cert_data)
-            fingerprint = cert.fingerprint(hashes.SHA256())
-            if key_id != fingerprint[0:8]:
-                raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
-        else:
-            pubkey_data = item['k']
-            pubkey = load_der_public_key(pubkey_data)
-
-            nb = item.get('nb')
-            not_valid_before = EPOCH + timedelta(seconds=nb) if nb is not None else DEFAULT_NOT_VALID_BEFORE
-
-            na = item.get('na')
-            not_valid_after = EPOCH + timedelta(seconds=na) if na is not None else DEFAULT_NOT_VALID_AFTER
-
-            if isinstance(pubkey, (EllipticCurvePublicKey, RSAPublicKey)):
-                cert = HackCertificate(pubkey, not_valid_before=not_valid_before, not_valid_after=not_valid_after)
+            if cert_data:
+                cert = load_der_x509_certificate(cert_data)
+                fingerprint = cert.fingerprint(hashes.SHA256())
+                if key_id != fingerprint[0:8]:
+                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
             else:
-                pubkey_type = type(pubkey)
-                raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+                pubkey_data = item['k']
+                pubkey = load_der_public_key(pubkey_data)
 
-        if key_id in certs:
-            print_warn(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
+                nb = item.get('nb')
+                not_valid_before = EPOCH + timedelta(seconds=nb) if nb is not None else DEFAULT_NOT_VALID_BEFORE
 
-        certs[key_id] = cert
+                na = item.get('na')
+                not_valid_after = EPOCH + timedelta(seconds=na) if na is not None else DEFAULT_NOT_VALID_AFTER
+
+                if isinstance(pubkey, (EllipticCurvePublicKey, RSAPublicKey)):
+                    cert = HackCertificate(pubkey, not_valid_before=not_valid_before, not_valid_after=not_valid_after)
+                else:
+                    pubkey_type = type(pubkey)
+                    raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
+
+            if key_id in certs:
+                print_warn(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
+
+        except Exception as error:
+            print_err(f'decoding {source} trust list entry {format_key_id(key_id)}: {error}')
+        else:
+            certs[key_id] = cert
 
     return certs
 
@@ -522,21 +526,17 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
             raise ValueError(f'Invalid signature of DE trust list: {sign.hex()}')
 
     for cert in body['certificates']:
-        key_id_b64 = cert['kid']
-        key_id     = b64decode(key_id_b64)
-        country    = cert['country']
-        cert_type  = cert['certificateType']
-        if cert_type != 'DSC':
-            print_err(f'decoding DE trust list entry {key_id.hex()} / {key_id_b64}: unknown certificateType {cert_type!r} (country={country}, kid={key_id.hex()}')
-            continue
-
-        raw_data = b64decode(cert['rawData'])
-
         try:
+            key_id_b64 = cert['kid']
+            key_id     = b64decode(key_id_b64)
+            country    = cert['country']
+            cert_type  = cert['certificateType']
+            if cert_type != 'DSC':
+                raise ValueError(f'unknown certificateType {cert_type!r} (country={country}, kid={key_id.hex()}')
+
+            raw_data = b64decode(cert['rawData'])
+
             cert = load_der_x509_certificate(raw_data)
-        except Exception as error:
-            print_err(f'decoding DE trust list entry {key_id.hex()} / {key_id_b64}: {error}')
-        else:
             fingerprint = cert.fingerprint(hashes.SHA256())
             if key_id != fingerprint[0:8]:
                 raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
@@ -544,6 +544,9 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
             if key_id in certs:
                 print_warn(f'doubled key ID in DE trust list, only using last: {format_key_id(key_id)}')
 
+        except Exception as error:
+            print_err(f'decoding DE trust list entry {format_key_id(key_id)}: {error}')
+        else:
             certs[key_id] = cert
 
     return certs
@@ -704,17 +707,17 @@ def download_se_certs() -> CertList:
             for key_data in entry['x5c']:
                 try:
                     cert = load_der_x509_certificate(b64decode_ignore_padding(key_data))
-                except Exception as error:
-                    print_err(f'decoding SE trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
-                else:
                     fingerprint = cert.fingerprint(hashes.SHA256())
                     if key_id != fingerprint[0:8]:
                         raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
-                if key_id in certs:
-                    print_warn(f'doubled key ID in SE trust list, only using last: {format_key_id(key_id)}')
+                    if key_id in certs:
+                        print_warn(f'doubled key ID in SE trust list, only using last: {format_key_id(key_id)}')
 
-                certs[key_id] = cert
+                except Exception as error:
+                    print_err(f'decoding SE trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
+                else:
+                    certs[key_id] = cert
 
     return certs
 
@@ -804,36 +807,33 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
     response.raise_for_status()
     certs_json = json.loads(response.content)
     for key_id_b64, cert_b64 in certs_json['certificatesDCC'].items():
-        key_id = b64decode_ignore_padding(key_id_b64)
-        cert_pem = b64decode(cert_b64)
-
-        # Yes, they encode it twice!
-        cert_der = b64decode(cert_pem)
-
         try:
+            key_id = b64decode_ignore_padding(key_id_b64)
+            cert_pem = b64decode(cert_b64)
+
+            # Yes, they encode it twice!
+            cert_der = b64decode(cert_pem)
+
             try:
                 cert = load_der_x509_certificate(cert_der)
             except ValueError:
                 cert = load_hack_certificate_from_der_public_key(cert_der)
                 # HackCertificate.fingerprint() is not implemented
 
-                if key_id in certs:
-                    print_warn(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
-
-                certs[key_id] = cert
-
             else:
                 fingerprint = cert.fingerprint(hashes.SHA256())
                 if key_id != fingerprint[0:8]:
+                    #print()
+                    #print_cert(key_id, cert, print_exts=True)
                     raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
-                if key_id in certs:
-                    print_warn(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
-
-                certs[key_id] = cert
+            if key_id in certs:
+                print_warn(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
 
         except Exception as error:
-            print_err(f'decoding FR trust list entry {key_id.hex()} / {key_id_b64}: {error}')
+            print_err(f'decoding FR trust list entry {format_key_id(key_id)}: {error}')
+        else:
+            certs[key_id] = cert
 
     return certs
 
@@ -1052,21 +1052,25 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
     # prevent tracking/surveilance.
     #
     for key_id_b64, pubkeys in payload_dict['eu_keys'].items():
-        key_id = b64decode(key_id_b64)
+        try:
+            key_id = b64decode(key_id_b64)
 
-        for entry in pubkeys:
-            # XXX: Why is subjectPk an array? How can there be more than one key to a key ID?
-            pubkey_der = b64decode(entry['subjectPk'])
-            # entry['keyUsage'] is array of 't' or 'v' or 'r'
-            try:
-                cert = load_hack_certificate_from_der_public_key(pubkey_der)
-            except Exception as error:
-                print_err(f'decoding NL trust list entry {key_id.hex()} / {key_id_b64}: {error}')
-            else:
-                if key_id in certs:
-                    print_warn(f'doubled key ID in NL trust list, only using last: {format_key_id(key_id)}')
+            for entry in pubkeys:
+                try:
+                    # XXX: Why is subjectPk an array? How can there be more than one key to a key ID?
+                    pubkey_der = b64decode(entry['subjectPk'])
+                    # entry['keyUsage'] is array of 't' or 'v' or 'r'
 
-                certs[key_id] = cert
+                    cert = load_hack_certificate_from_der_public_key(pubkey_der)
+
+                    if key_id in certs:
+                        print_warn(f'doubled key ID in NL trust list, only using last: {format_key_id(key_id)}')
+                except Exception as error:
+                    print_err(f'decoding NL trust list entry {format_key_id(key_id)}: {error}')
+                else:
+                    certs[key_id] = cert
+        except Exception as error:
+            print_err(f'decoding NL trust list entry {format_key_id(key_id)}: {error}')
     return certs
 
 CH_USER_AGENT = 'ch.admin.bag.covidcertificate.wallet;2.1.1;1626211804080;Android;28'
@@ -1121,52 +1125,55 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
     certs: CertList = {}
 
     for pub in pubkeys:
-        key_id = b64decode(pub['keyId']) # type: ignore
-        if key_id in active_key_ids:
-            alg = pub['alg']
-            usage: str = pub.get('use', 'tvr') # type: ignore
-            usages: List[ObjectIdentifier] = []
-            if usage != 'sig':
-                if 't' in usage:
-                    usages.append(VALID_FOR_TEST)
+        try:
+            key_id = b64decode(pub['keyId']) # type: ignore
+            if key_id in active_key_ids:
+                alg = pub['alg']
+                usage: str = pub.get('use', 'tvr') # type: ignore
+                usages: List[ObjectIdentifier] = []
+                if usage != 'sig':
+                    if 't' in usage:
+                        usages.append(VALID_FOR_TEST)
 
-                if 'v' in usage:
-                    usages.append(VALID_FOR_VACCINATION)
+                    if 'v' in usage:
+                        usages.append(VALID_FOR_VACCINATION)
 
-                if 'r' in usage:
-                    usages.append(VALID_FOR_RECOVERY)
-            exts: List[Extension] = []
-            if usages:
-                exts.append(Extension(ExtensionOID.EXTENDED_KEY_USAGE, False, ExtendedKeyUsage(usages)))
-            extensions = Extensions(exts)
+                    if 'r' in usage:
+                        usages.append(VALID_FOR_RECOVERY)
+                exts: List[Extension] = []
+                if usages:
+                    exts.append(Extension(ExtensionOID.EXTENDED_KEY_USAGE, False, ExtendedKeyUsage(usages)))
+                extensions = Extensions(exts)
 
-            if alg == 'ES256':
-                # EC
-                x_bytes = b64decode(pub['x']) # type: ignore
-                y_bytes = b64decode(pub['y']) # type: ignore
-                x = int.from_bytes(x_bytes, byteorder="big", signed=False)
-                y = int.from_bytes(y_bytes, byteorder="big", signed=False)
-                crv: str = pub['crv'] # type: ignore
-                curve = NIST_CURVES[crv]()
-                ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
-                cert = HackCertificate(ec_pubkey, extensions=extensions)
+                if alg == 'ES256':
+                    # EC
+                    x_bytes = b64decode(pub['x']) # type: ignore
+                    y_bytes = b64decode(pub['y']) # type: ignore
+                    x = int.from_bytes(x_bytes, byteorder="big", signed=False)
+                    y = int.from_bytes(y_bytes, byteorder="big", signed=False)
+                    crv: str = pub['crv'] # type: ignore
+                    curve = NIST_CURVES[crv]()
+                    ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
+                    cert = HackCertificate(ec_pubkey, extensions=extensions)
 
-            elif alg == 'RS256':
-                # RSA
-                e_bytes = b64decode(pub['e']) # type: ignore
-                n_bytes = b64decode(pub['n']) # type: ignore
-                e = int.from_bytes(e_bytes, byteorder="big", signed=False)
-                n = int.from_bytes(n_bytes, byteorder="big", signed=False)
-                rsa_pubkey = RSAPublicNumbers(e, n).public_key()
-                cert = HackCertificate(rsa_pubkey, extensions=extensions)
+                elif alg == 'RS256':
+                    # RSA
+                    e_bytes = b64decode(pub['e']) # type: ignore
+                    n_bytes = b64decode(pub['n']) # type: ignore
+                    e = int.from_bytes(e_bytes, byteorder="big", signed=False)
+                    n = int.from_bytes(n_bytes, byteorder="big", signed=False)
+                    rsa_pubkey = RSAPublicNumbers(e, n).public_key()
+                    cert = HackCertificate(rsa_pubkey, extensions=extensions)
 
-            else:
-                print_err(f'decoding CH trust list entry {format_key_id(key_id)}: algorithm not supported: {alg!r}')
+                else:
+                    raise NotImplementedError(f'algorithm not supported: {alg!r}')
 
-            if key_id in certs:
-                print_warn(f'doubled key ID in CH trust list, only using last: {format_key_id(key_id)}')
+                if key_id in certs:
+                    print_warn(f'doubled key ID in CH trust list, only using last: {format_key_id(key_id)}')
 
-            certs[key_id] = cert
+                certs[key_id] = cert
+        except Exception as error:
+            print_err(f'decoding CH trust list entry {format_key_id(key_id)}: {error}')
 
     return certs
 
@@ -1549,7 +1556,9 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
     if isinstance(msg, Sign1Message):
         print(f'Signature      : {b64encode(msg.signature).decode("ASCII")}')
 
-    # TODO: warn if key_id is in uhdr (unprotected header)?
+    # TODO: Should we allow (or warn about) key IDs from the unprotected header?
+    #       I mean, as long as the actual key it referres to is valid
+    #       (i.e. is in the trust list) it shouldn't matter, right?
     key_id = msg.phdr.get(KID) or msg.uhdr[KID]
 
     cert = certs.get(key_id) # XXX: is this correct? is it not two levels of signed certificates?
@@ -1583,17 +1592,14 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
     ehc = ehc_payload[-260][1]
 
     usage_valid = True
-    if 'v' in ehc:
-        if 'vaccination' not in usage:
-            usage_valid = False
+    if 'v' in ehc and 'vaccination' not in usage:
+        usage_valid = False
 
-    if 't' in ehc:
-        if 'test' not in usage:
-            usage_valid = False
+    if 't' in ehc and 'test' not in usage:
+        usage_valid = False
 
-    if 'r' in ehc:
-        if 'recovery' not in usage:
-            usage_valid = False
+    if 'r' in ehc and 'recovery' not in usage:
+        usage_valid = False
 
     print(f'Valid Key Usage: {usage_valid}')
     print(f'Signature Valid: {valid}')
@@ -1802,7 +1808,7 @@ def save_certs(certs: CertList, certs_path: str, allow_public_key_only: bool = F
                 try:
                     cert_bytes = cert.public_bytes(Encoding.DER)
                 except NotImplementedError as error:
-                    print_err(f'Cannot store entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")} in CBOR trust list: {error}')
+                    print_err(f'Cannot store entry {format_key_id(key_id)} in CBOR trust list: {error}')
                 else:
                     cert_list.append({
                         'i': key_id,
