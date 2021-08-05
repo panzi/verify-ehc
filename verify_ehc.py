@@ -390,6 +390,12 @@ def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
                 pubkey_data = item['k']
                 pubkey = load_der_public_key(pubkey_data)
 
+                issuer_dict = item.get('is')
+                issuer  = parse_json_relative_distinguished_name(issuer_dict) if issuer_dict is not None else Name([])
+
+                subject_dict = item.get('su')
+                subject = parse_json_relative_distinguished_name(subject_dict) if subject_dict is not None else Name([])
+
                 nb = item.get('nb')
                 not_valid_before = EPOCH + timedelta(seconds=nb) if nb is not None else DEFAULT_NOT_VALID_BEFORE
 
@@ -397,7 +403,12 @@ def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
                 not_valid_after = EPOCH + timedelta(seconds=na) if na is not None else DEFAULT_NOT_VALID_AFTER
 
                 if isinstance(pubkey, (EllipticCurvePublicKey, RSAPublicKey)):
-                    cert = HackCertificate(pubkey, not_valid_before=not_valid_before, not_valid_after=not_valid_after)
+                    cert = HackCertificate(pubkey,
+                        not_valid_before = not_valid_before,
+                        not_valid_after  = not_valid_after,
+                        issuer  = issuer,
+                        subject = subject,
+                    )
                 else:
                     pubkey_type = type(pubkey)
                     raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
@@ -1811,8 +1822,15 @@ def save_certs(certs: CertList, certs_path: str, allow_public_key_only: bool = F
         for key_id, cert in certs.items():
             if allow_public_key_only and isinstance(cert, HackCertificate):
                 entry = {
+                    'i': key_id,
                     'k': cert.public_key().public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo),
                 }
+
+                issuer = cert.issuer
+                if issuer: entry['is'] = make_json_relative_distinguished_name(issuer)
+
+                subject = cert.subject
+                if subject: entry['su'] = make_json_relative_distinguished_name(subject)
 
                 not_valid_before = cert.not_valid_before
                 if not_valid_before is not DEFAULT_NOT_VALID_BEFORE:
