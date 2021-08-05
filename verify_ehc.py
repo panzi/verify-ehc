@@ -245,7 +245,7 @@ ROOT_CERT_URL_SE = 'https://dgcg.covidbevis.se/tp/cert'
 # See: https://github.com/DIGGSweden/dgc-trust/blob/main/specifications/trust-list.md
 
 # United Kingdom trust list:
-CERTS_URL_UK = 'https://covid-status.service.nhsx.nhs.uk/pubkeys/keys.json'
+CERTS_URL_GB = 'https://covid-status.service.nhsx.nhs.uk/pubkeys/keys.json'
 
 CERTS_URL_COVID_PASS_VERIFIER = 'https://covid-pass-verifier.com/assets/certificates.json'
 
@@ -823,9 +823,28 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
             else:
                 fingerprint = cert.fingerprint(hashes.SHA256())
                 if key_id != fingerprint[0:8]:
-                    #print()
-                    #print_cert(key_id, cert, print_exts=True)
-                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+                    pubkey = cert.public_key()
+                    attrs = cert.subject.get_attributes_for_oid(NameOID.COUNTRY_NAME)
+                    if attrs and all(attr.value == 'UK' for attr in attrs) and isinstance(pubkey, (RSAPublicKey, EllipticCurvePublicKey)):
+                        # replace fake FR trust list certificate by my own fake certificate
+                        # XXX: not eintirely sure if I should do this?
+
+                        issuer  = [attr for attr in cert.issuer  if attr.oid != NameOID.COUNTRY_NAME]
+                        subject = [attr for attr in cert.subject if attr.oid != NameOID.COUNTRY_NAME]
+                        issuer.append( NameAttribute(NameOID.COUNTRY_NAME, 'GB'))
+                        subject.append(NameAttribute(NameOID.COUNTRY_NAME, 'GB'))
+
+                        cert = HackCertificate(
+                            pubkey,
+                            issuer  = Name(issuer),
+                            subject = Name(subject),
+                            not_valid_before = cert.not_valid_before,
+                            not_valid_after  = cert.not_valid_after,
+                        )
+                    else:
+                        #print()
+                        #print_cert(key_id, cert, print_exts=True)
+                        raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
             if key_id in certs:
                 print_warn(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
@@ -1212,7 +1231,7 @@ def download_no_certs(token: Optional[str] = None) -> CertList:
     return certs
 
 def download_gb_certs() -> CertList:
-    response = requests.get(CERTS_URL_UK, headers={'User-Agent': USER_AGENT})
+    response = requests.get(CERTS_URL_GB, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
 
     certs: CertList = {}
