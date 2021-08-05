@@ -47,6 +47,20 @@
                                 "format": "binary",
                                 "description": "DER encoded public key"
                             },
+                            "is": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string"
+                                },
+                                "description": "Issuer name key-value pairs using defined short attribute names like 'C' for 2.5.4.6 (country name) and full dotted strings otherwise."
+                            },
+                            "su": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string"
+                                },
+                                "description": "Subject name key-value pairs using defined short attribute names like 'C' for 2.5.4.6 (country name) and full dotted strings otherwise."
+                            },
                             "nb": {
                                 "type": "number",
                                 "format": "integer",
