@@ -52,7 +52,8 @@ usage: verify_ehc.py [--help]
                      [--strip-revoked] [--save-certs FILE]
                      [--download-root-cert SOURCE[@FILENAME]]
                      [--download-all-root-certs] [--allow-public-key-only]
-                     [--envfile FILE] [--image]
+                     [--envfile FILE] [--fail-on-error] [--warning-as-error]
+                     [--image]
                      [ehc_code ...]
 
 positional arguments:
@@ -104,6 +105,8 @@ optional arguments:
   --envfile FILE        Load environment variables from FILE. Default is
                         ".env". Set this to an empty string to not load
                         environment varibles from a file.
+  --fail-on-error       Turns every error into an exception.
+  --warning-as-error    Turns every warning into an error.
   --image               ehc_code is a path to an image file containing a
                         QR-code.
 
@@ -137,7 +140,9 @@ environment variables:
 
   FR_TOKEN            Downloading the French (FR) trust list needs the
                       environment variable FR_TOKEN set to a bearer token that
-                      can be found in the TousAntiCovid Verif app APK.
+                      can be found in the TousAntiCovid Verif app. See also
+                      token_lite:
+                      https://gitlab.inria.fr/tousanticovid-verif/tousanticovid-verif-ios/-/blob/master/Anticovid%20Verify/resources/prod/prod.plist
 
   NO_TOKEN            Downloading the Norwegian (NO) trust list needs the
                       environment variable NO_TOKEN set to an AuthorizationHeader
