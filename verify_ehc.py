@@ -809,7 +809,8 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
         if token is None:
             raise KeyError(
                 'Required environment variable FR_TOKEN for FR trust list is not set. '
-                'You can get the value of the token from the TousAntiCovid Verif app APK.')
+                'You can get the value of the token from the TousAntiCovid Verif app. '
+                'See token_lite at https://gitlab.inria.fr/tousanticovid-verif/tousanticovid-verif-ios/-/blob/master/Anticovid%20Verify/resources/prod/prod.plist')
 
     response = requests.get(CERTS_URL_FR, headers={
         'User-Agent': USER_AGENT,
@@ -2100,7 +2101,8 @@ def main() -> None:
                     (
                         'FR_TOKEN',
                         "Downloading the French (FR) trust list needs the environment variable FR_TOKEN set to a bearer "
-                        "token that can be found in the TousAntiCovid Verif app APK."
+                        "token that can be found in the TousAntiCovid Verif app. "
+                        "See also token_lite: https://gitlab.inria.fr/tousanticovid-verif/tousanticovid-verif-ios/-/blob/master/Anticovid%20Verify/resources/prod/prod.plist"
                     ),
                     (
                         'NO_TOKEN',
