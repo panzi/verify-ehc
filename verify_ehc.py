@@ -30,6 +30,7 @@ from dateutil.parser import isoparse as parse_datetime
 from jose import jwt, jws, jwk # type: ignore
 from base45 import b45decode # type: ignore
 from requests.exceptions import BaseHTTPError # type: ignore
+from requests.cookies import RequestsCookieJar # type: ignore
 
 from cose.headers import KID, Algorithm # type: ignore
 from cose.keys import CoseKey
@@ -165,7 +166,7 @@ OLD_CERTS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/listv2'
 OLD_SIGNS_URL_AT = 'https://dgc.a-sit.at/ehn/cert/sigv2'
 
 # Trust List used by Austrian greencheck app:
-CERTS_URL_AT_GREENCHECK = 'https://greencheck.gv.at/api/masterdata'
+CERTS_URL_AT_GREENCHECK = 'https://greencheck.gv.at/api/v2/masterdata'
 
 CERTS_URL_AT_PROD = 'https://dgc-trust.qr.gv.at/trustlist'
 SIGN_URL_AT_PROD  = 'https://dgc-trust.qr.gv.at/trustlistsig'
@@ -563,7 +564,26 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
     return certs
 
 def download_at_greencheck_certs() -> CertList:
-    response = requests.get(CERTS_URL_AT_GREENCHECK, headers={'User-Agent': USER_AGENT})
+    root_certs: Dict[bytes, x509.Certificate]
+    cookies: Optional[RequestsCookieJar] = None
+
+    try:
+        root_certs, cookies = get_at_greencheck_root_certs_and_cookies()
+    except (BaseHTTPError, ValueError, KeyError) as error:
+        print_err(f'AT trust list error (NOT VALIDATING): {error}')
+        root_certs = {}
+
+    response = requests.get(CERTS_URL_AT_GREENCHECK, headers={
+        'User-Agent': USER_AGENT,
+        'Accept': 'application/json',
+        'x-app-type': 'browser',
+        'x-app-version': '1.2',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-GPC': '1',
+        'Cache-Control': 'max-age=0',
+    }, cookies=cookies)
     response.raise_for_status()
     certs_json = json.loads(response.content)['trustList']
     certs_cbor = b64decode(certs_json['trustListContent'])
@@ -575,14 +595,10 @@ def download_at_greencheck_certs() -> CertList:
         raise TypeError(f'AT trust list: expected signature to be a Sign1 COSE message, but is: {msg_type.__module__}.{msg_type.__name__}')
 
     root_cert_key_id = sig_msg.phdr.get(KID) or sig_msg.uhdr[KID]
-    root_cert: Optional[x509.Certificate] = None
 
-    try:
-        root_cert = get_at_greencheck_root_cert(root_cert_key_id)
-    except (BaseHTTPError, ValueError, KeyError) as error:
-        print_err(f'AT trust list error (NOT VALIDATING): {error}')
+    root_cert: Optional[x509.Certificate] = root_certs.get(root_cert_key_id)
 
-    if root_cert:
+    if root_cert is not None:
         now = datetime.utcnow()
         if now < root_cert.not_valid_before:
             raise ValueError(f'AT trust list root certificate not yet valid: {now.isoformat()} < {root_cert.not_valid_before.isoformat()}')
@@ -1307,18 +1323,27 @@ def download_ehc_certs(sources: List[str], certs_table: Dict[str, CertList] = {}
     return certs
 
 def get_at_greencheck_root_cert(root_cert_key_id: bytes = ROOT_CERT_KEY_ID_AT) -> x509.Certificate:
+    root_certs, _cookies = get_at_greencheck_root_certs_and_cookies()
+    root_cert = root_certs.get(root_cert_key_id)
+    if root_cert is None:
+        raise KeyError(f'AT certificate with key ID {format_key_id(root_cert_key_id)} not found!')
+    return root_cert
+
+def get_at_greencheck_root_certs_and_cookies() -> Tuple[Dict[bytes, x509.Certificate], RequestsCookieJar]:
     # TODO: Find out another place where to get the AT root certificate from.
     #       This gets it from the same server as the trust list itself, which is suboptimal.
 
     response = requests.get('https://greencheck.gv.at/', headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
+    cookies = response.cookies
 
     doc = parse_html(response.content.decode(response.encoding or 'UTF-8'))
+    root_certs: Dict[bytes, x509.Certificate] = {}
 
     for script in doc.xpath('//script'):
         src = script.attrib.get('src')
         if src and src.startswith('/static/js/main.') and src.endswith('.chunk.js'):
-            response = requests.get(f'https://greencheck.gv.at{src}', headers={'User-Agent': USER_AGENT})
+            response = requests.get(f'https://greencheck.gv.at{src}', headers={'User-Agent': USER_AGENT}, cookies=cookies)
             status_code = response.status_code
             if status_code < 200 or status_code >= 300:
                 print_err(f'https://greencheck.gv.at{src} {status_code} {http.client.responses.get(status_code, "")}')
@@ -1333,10 +1358,9 @@ def get_at_greencheck_root_cert(root_cert_key_id: bytes = ROOT_CERT_KEY_ID_AT) -
                         meta_cert = load_pem_x509_certificate(meta_cert_src.encode())
 
                         key_id = meta_cert.fingerprint(hashes.SHA256())[:8]
-                        if key_id == root_cert_key_id:
-                            return meta_cert
+                        root_certs[key_id] = meta_cert
 
-    raise KeyError(f'AT certificate with key ID {format_key_id(root_cert_key_id)} not found!')
+    return root_certs, cookies
 
 def get_at_github_root_cert(test: bool = False) -> x509.Certificate:
     response = requests.get('https://raw.githubusercontent.com/Federal-Ministry-of-Health-AT/green-pass-overview/main/README.md', headers={'User-Agent': USER_AGENT})
