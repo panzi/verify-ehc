@@ -1630,7 +1630,7 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
     if cert.not_valid_after is not None and issued_at > cert.not_valid_after:
         cert_expired = True
 
-    print(f'  Cert Expired   : {cert_expired}')
+    print(f'  Cert Expired    : {cert_expired}')
     revoked_cert = get_revoked_cert(cert)
     if revoked_cert:
         print(f'Cert Revoked At: {revoked_cert.revocation_date.isoformat()}')
