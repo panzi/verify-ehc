@@ -577,7 +577,7 @@ def download_at_greencheck_certs() -> CertList:
         'User-Agent': USER_AGENT,
         'Accept': 'application/json',
         'x-app-type': 'browser',
-        'x-app-version': '1.3',
+        'x-app-version': '1.4',
         'Sec-Fetch-Dest': 'empty',
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin',
