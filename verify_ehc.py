@@ -2301,14 +2301,23 @@ def main() -> None:
     if args.image:
         from pyzbar.pyzbar import decode as decode_qrcode # type: ignore
         from PIL import Image # type: ignore
+        from pdf2image import convert_from_path
 
         for filename in args.ehc_code:
-            image = Image.open(filename, 'r')
-            qrcodes = decode_qrcode(image)
-            if qrcodes:
-                for qrcode in qrcodes:
-                    ehc_codes.append(qrcode.data.decode("utf-8"))
+            images: List[Image] = []
+            if filename.endswith('.pdf'):
+                images = convert_from_path(filename)
             else:
+                images.append(Image.open(filename, 'r'))
+
+            if images:
+                for image in images:
+                    qrcodes = decode_qrcode(image)
+                    if qrcodes:
+                        for qrcode in qrcodes:
+                            ehc_codes.append(qrcode.data.decode("utf-8"))
+
+            if not ehc_codes:
                 print_err(f'{filename}: no qr-code found')
     else:
         ehc_codes.extend(args.ehc_code)
