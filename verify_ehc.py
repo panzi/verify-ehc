@@ -378,8 +378,8 @@ def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
     certs_data = cbor2.loads(cbor_data)
     certs: CertList = {}
     for item in certs_data['c']:
+        key_id = item.get('i')
         try:
-            key_id = item['i']
             cert_data = item.get('c')
 
             if cert_data:
@@ -541,25 +541,29 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
         try:
             key_id_b64 = cert['kid']
             key_id     = b64decode(key_id_b64)
-            country    = cert['country']
-            cert_type  = cert['certificateType']
-            if cert_type != 'DSC':
-                raise ValueError(f'unknown certificateType {cert_type!r} (country={country}, kid={key_id.hex()}')
-
-            raw_data = b64decode(cert['rawData'])
-
-            cert = load_der_x509_certificate(raw_data)
-            fingerprint = cert.fingerprint(hashes.SHA256())
-            if key_id != fingerprint[0:8]:
-                raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
-
-            if key_id in certs:
-                print_warn(f'doubled key ID in DE trust list, only using last: {format_key_id(key_id)}')
-
         except Exception as error:
-            print_err(f'decoding DE trust list entry {format_key_id(key_id)}: {error}')
+            print_err(f'decoding DE trust list entry {json.dumps(cert)}: {error}')
         else:
-            certs[key_id] = cert
+            try:
+                country    = cert['country']
+                cert_type  = cert['certificateType']
+                if cert_type != 'DSC':
+                    raise ValueError(f'unknown certificateType {cert_type!r} (country={country}, kid={key_id.hex()}')
+
+                raw_data = b64decode(cert['rawData'])
+
+                cert = load_der_x509_certificate(raw_data)
+                fingerprint = cert.fingerprint(hashes.SHA256())
+                if key_id != fingerprint[0:8]:
+                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+                if key_id in certs:
+                    print_warn(f'doubled key ID in DE trust list, only using last: {format_key_id(key_id)}')
+
+            except Exception as error:
+                print_err(f'decoding DE trust list entry {format_key_id(key_id)}: {error}')
+            else:
+                certs[key_id] = cert
 
     return certs
 
@@ -837,50 +841,54 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
     for key_id_b64, cert_b64 in certs_json['certificatesDCC'].items():
         try:
             key_id = b64decode_ignore_padding(key_id_b64)
-            cert_pem = b64decode(cert_b64)
-
-            # Yes, they encode it twice!
-            cert_der = b64decode(cert_pem)
-
-            try:
-                cert = load_der_x509_certificate(cert_der)
-            except ValueError:
-                cert = load_hack_certificate_from_der_public_key(cert_der)
-                # HackCertificate.fingerprint() is not implemented
-
-            else:
-                fingerprint = cert.fingerprint(hashes.SHA256())
-                if key_id != fingerprint[0:8]:
-                    pubkey = cert.public_key()
-                    attrs = cert.subject.get_attributes_for_oid(NameOID.COUNTRY_NAME)
-                    if attrs and all(attr.value == 'UK' for attr in attrs) and isinstance(pubkey, (RSAPublicKey, EllipticCurvePublicKey)):
-                        # replace fake FR trust list certificate by my own fake certificate
-                        # XXX: not eintirely sure if I should do this?
-
-                        issuer  = [attr for attr in cert.issuer  if attr.oid != NameOID.COUNTRY_NAME]
-                        subject = [attr for attr in cert.subject if attr.oid != NameOID.COUNTRY_NAME]
-                        issuer.append( NameAttribute(NameOID.COUNTRY_NAME, 'GB'))
-                        subject.append(NameAttribute(NameOID.COUNTRY_NAME, 'GB'))
-
-                        cert = HackCertificate(
-                            pubkey,
-                            issuer  = Name(issuer),
-                            subject = Name(subject),
-                            not_valid_before = cert.not_valid_before,
-                            not_valid_after  = cert.not_valid_after,
-                        )
-                    else:
-                        #print()
-                        #print_cert(key_id, cert, print_exts=True)
-                        raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
-
-            if key_id in certs:
-                print_warn(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
-
         except Exception as error:
-            print_err(f'decoding FR trust list entry {format_key_id(key_id)}: {error}')
+            print_err(f'decoding FR trust list entry {key_id_b64}: {error}')
         else:
-            certs[key_id] = cert
+            try:
+                cert_pem = b64decode(cert_b64)
+
+                # Yes, they encode it twice!
+                cert_der = b64decode(cert_pem)
+
+                try:
+                    cert = load_der_x509_certificate(cert_der)
+                except ValueError:
+                    cert = load_hack_certificate_from_der_public_key(cert_der)
+                    # HackCertificate.fingerprint() is not implemented
+
+                else:
+                    fingerprint = cert.fingerprint(hashes.SHA256())
+                    if key_id != fingerprint[0:8]:
+                        pubkey = cert.public_key()
+                        attrs = cert.subject.get_attributes_for_oid(NameOID.COUNTRY_NAME)
+                        if attrs and all(attr.value == 'UK' for attr in attrs) and isinstance(pubkey, (RSAPublicKey, EllipticCurvePublicKey)):
+                            # replace fake FR trust list certificate by my own fake certificate
+                            # XXX: not eintirely sure if I should do this?
+
+                            issuer  = [attr for attr in cert.issuer  if attr.oid != NameOID.COUNTRY_NAME]
+                            subject = [attr for attr in cert.subject if attr.oid != NameOID.COUNTRY_NAME]
+                            issuer.append( NameAttribute(NameOID.COUNTRY_NAME, 'GB'))
+                            subject.append(NameAttribute(NameOID.COUNTRY_NAME, 'GB'))
+
+                            cert = HackCertificate(
+                                pubkey,
+                                issuer  = Name(issuer),
+                                subject = Name(subject),
+                                not_valid_before = cert.not_valid_before,
+                                not_valid_after  = cert.not_valid_after,
+                            )
+                        else:
+                            #print()
+                            #print_cert(key_id, cert, print_exts=True)
+                            raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+                if key_id in certs:
+                    print_warn(f'doubled key ID in FR trust list, only using last: {format_key_id(key_id)}')
+
+            except Exception as error:
+                print_err(f'decoding FR trust list entry {format_key_id(key_id)}: {error}')
+            else:
+                certs[key_id] = cert
 
     return certs
 
@@ -997,6 +1005,8 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
             cert = certs_by_serial[serial_number]
         elif sid.name == 'subject_key_identifier':
             cert = trustchain[sid.chosen.native]
+        else:
+            return False
 
         if not verify_trust_chain(cert, trustchain, root_cert):
             return False
@@ -1101,23 +1111,27 @@ def download_nl_certs(token: Optional[str] = None) -> CertList:
     for key_id_b64, pubkeys in payload_dict['eu_keys'].items():
         try:
             key_id = b64decode(key_id_b64)
-
-            for entry in pubkeys:
-                try:
-                    # XXX: Why is subjectPk an array? How can there be more than one key to a key ID?
-                    pubkey_der = b64decode(entry['subjectPk'])
-                    # entry['keyUsage'] is array of 't' or 'v' or 'r'
-
-                    cert = load_hack_certificate_from_der_public_key(pubkey_der)
-
-                    if key_id in certs:
-                        print_warn(f'doubled key ID in NL trust list, only using last: {format_key_id(key_id)}')
-                except Exception as error:
-                    print_err(f'decoding NL trust list entry {format_key_id(key_id)}: {error}')
-                else:
-                    certs[key_id] = cert
         except Exception as error:
-            print_err(f'decoding NL trust list entry {format_key_id(key_id)}: {error}')
+            print_err(f'decoding NL trust list entry {key_id_b64}: {error}')
+        else:
+            try:
+
+                for entry in pubkeys:
+                    try:
+                        # XXX: Why is subjectPk an array? How can there be more than one key to a key ID?
+                        pubkey_der = b64decode(entry['subjectPk'])
+                        # entry['keyUsage'] is array of 't' or 'v' or 'r'
+
+                        cert = load_hack_certificate_from_der_public_key(pubkey_der)
+
+                        if key_id in certs:
+                            print_warn(f'doubled key ID in NL trust list, only using last: {format_key_id(key_id)}')
+                    except Exception as error:
+                        print_err(f'decoding NL trust list entry {format_key_id(key_id)}: {error}')
+                    else:
+                        certs[key_id] = cert
+            except Exception as error:
+                print_err(f'decoding NL trust list entry {format_key_id(key_id)}: {error}')
     return certs
 
 CH_USER_AGENT = 'ch.admin.bag.covidcertificate.wallet;2.1.1;1626211804080;Android;28'
@@ -1174,53 +1188,57 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
     for pub in pubkeys:
         try:
             key_id = b64decode(pub['keyId']) # type: ignore
-            if key_id in active_key_ids:
-                alg = pub['alg']
-                usage: str = pub.get('use', 'tvr') # type: ignore
-                usages: List[ObjectIdentifier] = []
-                if usage != 'sig':
-                    if 't' in usage:
-                        usages.append(VALID_FOR_TEST)
-
-                    if 'v' in usage:
-                        usages.append(VALID_FOR_VACCINATION)
-
-                    if 'r' in usage:
-                        usages.append(VALID_FOR_RECOVERY)
-                exts: List[Extension] = []
-                if usages:
-                    exts.append(Extension(ExtensionOID.EXTENDED_KEY_USAGE, False, ExtendedKeyUsage(usages)))
-                extensions = Extensions(exts)
-
-                if alg == 'ES256':
-                    # EC
-                    x_bytes = b64decode(pub['x']) # type: ignore
-                    y_bytes = b64decode(pub['y']) # type: ignore
-                    x = int.from_bytes(x_bytes, byteorder="big", signed=False)
-                    y = int.from_bytes(y_bytes, byteorder="big", signed=False)
-                    crv: str = pub['crv'] # type: ignore
-                    curve = NIST_CURVES[crv]()
-                    ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
-                    cert = HackCertificate(ec_pubkey, extensions=extensions)
-
-                elif alg == 'RS256':
-                    # RSA
-                    e_bytes = b64decode(pub['e']) # type: ignore
-                    n_bytes = b64decode(pub['n']) # type: ignore
-                    e = int.from_bytes(e_bytes, byteorder="big", signed=False)
-                    n = int.from_bytes(n_bytes, byteorder="big", signed=False)
-                    rsa_pubkey = RSAPublicNumbers(e, n).public_key()
-                    cert = HackCertificate(rsa_pubkey, extensions=extensions)
-
-                else:
-                    raise NotImplementedError(f'algorithm not supported: {alg!r}')
-
-                if key_id in certs:
-                    print_warn(f'doubled key ID in CH trust list, only using last: {format_key_id(key_id)}')
-
-                certs[key_id] = cert
         except Exception as error:
-            print_err(f'decoding CH trust list entry {format_key_id(key_id)}: {error}')
+            print_err(f'decoding CH trust list entry {json.dumps(pub)}: {error}')
+        else:
+            try:
+                if key_id in active_key_ids:
+                    alg = pub['alg']
+                    usage: str = pub.get('use', 'tvr') # type: ignore
+                    usages: List[ObjectIdentifier] = []
+                    if usage != 'sig':
+                        if 't' in usage:
+                            usages.append(VALID_FOR_TEST)
+
+                        if 'v' in usage:
+                            usages.append(VALID_FOR_VACCINATION)
+
+                        if 'r' in usage:
+                            usages.append(VALID_FOR_RECOVERY)
+                    exts: List[Extension] = []
+                    if usages:
+                        exts.append(Extension(ExtensionOID.EXTENDED_KEY_USAGE, False, ExtendedKeyUsage(usages)))
+                    extensions = Extensions(exts)
+
+                    if alg == 'ES256':
+                        # EC
+                        x_bytes = b64decode(pub['x']) # type: ignore
+                        y_bytes = b64decode(pub['y']) # type: ignore
+                        x = int.from_bytes(x_bytes, byteorder="big", signed=False)
+                        y = int.from_bytes(y_bytes, byteorder="big", signed=False)
+                        crv: str = pub['crv'] # type: ignore
+                        curve = NIST_CURVES[crv]()
+                        ec_pubkey = EllipticCurvePublicNumbers(x, y, curve).public_key()
+                        cert = HackCertificate(ec_pubkey, extensions=extensions)
+
+                    elif alg == 'RS256':
+                        # RSA
+                        e_bytes = b64decode(pub['e']) # type: ignore
+                        n_bytes = b64decode(pub['n']) # type: ignore
+                        e = int.from_bytes(e_bytes, byteorder="big", signed=False)
+                        n = int.from_bytes(n_bytes, byteorder="big", signed=False)
+                        rsa_pubkey = RSAPublicNumbers(e, n).public_key()
+                        cert = HackCertificate(rsa_pubkey, extensions=extensions)
+
+                    else:
+                        raise NotImplementedError(f'algorithm not supported: {alg!r}')
+
+                    if key_id in certs:
+                        print_warn(f'doubled key ID in CH trust list, only using last: {format_key_id(key_id)}')
+
+                    certs[key_id] = cert
+            except Exception as error:
+                print_err(f'decoding CH trust list entry {format_key_id(key_id)}: {error}')
 
     return certs
 
@@ -1605,7 +1623,7 @@ def format_key_id(key_id: bytes) -> str:
 
     return f'{key_id_hex} / {key_id_b64}'
 
-def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_exts: bool = False) -> bool:
+def verify_ehc(msg: Sign1Message, issued_at: datetime, certs: CertList, print_exts: bool = False) -> bool:
     cose_algo = msg.phdr.get(Algorithm) or msg.uhdr.get(Algorithm)
     print(f'COSE Sig. Algo.: {cose_algo.fullname if cose_algo is not None else "N/A"}')
     if isinstance(msg, Sign1Message):
@@ -1803,6 +1821,7 @@ def save_certs(certs: CertList, certs_path: str, allow_public_key_only: bool = F
             pubkey = cert.public_key()
             pubkey_jwk = JWK.from_pyca(pubkey)
             pubkey_json = pubkey_jwk.export(as_dict=True, private_key=False)
+            assert isinstance(pubkey_json, dict)
             pubkey_json['key_ops'] = ['verify']
 
             # not sure about this:
@@ -1843,10 +1862,10 @@ def save_certs(certs: CertList, certs_path: str, allow_public_key_only: bool = F
 
     elif lower_ext == '.cbor':
         # same CBOR format as AT trust list
-        cert_list: List[dict] = []
+        cert_list: List[Dict[str, Any]] = []
         for key_id, cert in certs.items():
             if allow_public_key_only and isinstance(cert, HackCertificate):
-                entry = {
+                entry: Dict[str, Any] = {
                     'i': key_id,
                     'k': cert.public_key().public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo),
                 }
@@ -2268,26 +2287,26 @@ def main() -> None:
         if not certs:
             print_err("empty trust list!")
 
-        items: List[Tuple[bytes, x509.Certificate]]
         revoked_certs: Dict[bytes, x509.RevokedCertificate] = {}
         if args.list_certs or args.strip_revoked:
+            items: List[Tuple[bytes, x509.Certificate]]
             items = list(certs.items())
             items.sort(key=lambda item: (item[1].issuer.rfc4514_string(), item[1].subject.rfc4514_string(), item[0]))
 
-        if args.strip_revoked:
-            for key_id, cert in items:
-                revoked_cert = get_revoked_cert(cert)
-                if revoked_cert:
-                    revoked_certs[key_id] = revoked_cert
-                    revoked = True
+            if args.strip_revoked:
+                for key_id, cert in items:
+                    revoked_cert = get_revoked_cert(cert)
+                    if revoked_cert:
+                        revoked_certs[key_id] = revoked_cert
+                        revoked = True
 
-        if args.list_certs:
-            revoked_certs_for_print: Optional[Dict[bytes, x509.RevokedCertificate]] = revoked_certs if args.strip_revoked else None
-            for key_id, cert in items:
-                print_cert(key_id, cert,
-                    print_exts=args.print_exts,
-                    revoked_certs=revoked_certs_for_print)
-                print()
+            if args.list_certs:
+                revoked_certs_for_print: Optional[Dict[bytes, x509.RevokedCertificate]] = revoked_certs if args.strip_revoked else None
+                for key_id, cert in items:
+                    print_cert(key_id, cert,
+                        print_exts=args.print_exts,
+                        revoked_certs=revoked_certs_for_print)
+                    print()
 
         if args.strip_revoked:
             for key_id in revoked_certs:
@@ -2301,11 +2320,11 @@ def main() -> None:
     if args.image:
         from pyzbar.pyzbar import decode as decode_qrcode # type: ignore
         from PIL import Image # type: ignore
-        from pdf2image import convert_from_path
 
         for filename in args.ehc_code:
-            images: List[Image] = []
-            if filename.endswith('.pdf'):
+            images: List[Image.Image] = []
+            if filename.lower().endswith('.pdf'):
+                from pdf2image import convert_from_path # type: ignore
                 images = convert_from_path(filename)
             else:
                 images.append(Image.open(filename, 'r'))
