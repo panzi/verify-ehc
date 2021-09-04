@@ -10,3 +10,4 @@ jwcrypto
 python-dateutil
 lxml
 asn1crypto
+pdf2image
