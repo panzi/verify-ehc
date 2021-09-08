@@ -45,7 +45,7 @@ from cryptography import x509
 from cryptography.x509 import load_der_x509_certificate, load_pem_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, RelativeDistinguishedName, NameAttribute, Version, Extensions, Extension
 from cryptography.x509.extensions import ExtensionNotFound, ExtendedKeyUsage
 from cryptography.x509.name import _NAMEOID_TO_NAME
-from cryptography.x509.oid import NameOID, ObjectIdentifier, SignatureAlgorithmOID, ExtensionOID
+from cryptography.x509.oid import NameOID, ObjectIdentifier, ExtensionOID
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key, load_der_public_key
