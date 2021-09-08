@@ -610,10 +610,10 @@ def download_at_greencheck_certs() -> CertList:
         if now > root_cert.not_valid_after:
             raise ValueError(f'AT trust list root certificate already expired: {now.isoformat()} > {root_cert.not_valid_after.isoformat()}')
 
-        sig_msg.key = cert_to_cose_key(root_cert)
+        sig_msg.key = cert_to_cose_key(root_cert) # type: ignore
 
-        if not sig_msg.verify_signature():
-            raise ValueError(f'Invalid signature of AT trust list: {sig_msg.signature.hex()}')
+        if not sig_msg.verify_signature(): # type: ignore
+            raise ValueError(f'Invalid signature of AT trust list: {sig_msg.signature.hex()}') # type: ignore
 
         sig = cbor2.loads(sig_msg.payload)
         digest = hashlib.sha256(certs_cbor).digest()
@@ -683,10 +683,10 @@ def download_at_certs(test: bool = False, token: Optional[str] = None) -> CertLi
     if now > root_cert.not_valid_after:
         raise ValueError(f'AT trust list root certificate already expired: {now.isoformat()} > {root_cert.not_valid_after.isoformat()}')
 
-    sig_msg.key = cert_to_cose_key(root_cert)
+    sig_msg.key = cert_to_cose_key(root_cert) # type: ignore
 
-    if not sig_msg.verify_signature():
-        raise ValueError(f'Invalid signature of AT trust list: {sig_msg.signature.hex()}')
+    if not sig_msg.verify_signature(): # type: ignore
+        raise ValueError(f'Invalid signature of AT trust list: {sig_msg.signature.hex()}') # type: ignore
 
     sig = cbor2.loads(sig_msg.payload)
     digest = hashlib.sha256(certs_cbor).digest()
@@ -973,7 +973,7 @@ def verify_trust_chain(cert: x509.Certificate, trustchain: Dict[bytes, x509.Cert
 
 def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert: x509.Certificate) -> bool:
     content_info = asn1crypto.cms.ContentInfo.load(signature)
-    content = content_info['content']
+    content = content_info['content'] # type: ignore
     cert_set = content['certificates']
 
     certs: List[x509.Certificate] = []
@@ -1573,7 +1573,7 @@ def load_jwt(token: bytes, root_cert: x509.Certificate, options: Optional[Dict[s
         pubkey_type = type(pubkey)
         raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
-    return jwt.decode(token, key=sigkey, options=options)
+    return jwt.decode(token, key=sigkey, options=options) # type: ignore
 
 def load_hack_certificate_from_der_public_key(data: bytes,
     issuer:  Optional[Name] = None,
@@ -1623,11 +1623,11 @@ def format_key_id(key_id: bytes) -> str:
 
     return f'{key_id_hex} / {key_id_b64}'
 
-def verify_ehc(msg: Sign1Message, issued_at: datetime, certs: CertList, print_exts: bool = False) -> bool:
+def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_exts: bool = False) -> bool:
     cose_algo = msg.phdr.get(Algorithm) or msg.uhdr.get(Algorithm)
     print(f'COSE Sig. Algo.: {cose_algo.fullname if cose_algo is not None else "N/A"}')
     if isinstance(msg, Sign1Message):
-        print(f'Signature      : {b64encode(msg.signature).decode("ASCII")}')
+        print(f'Signature      : {b64encode(msg.signature).decode("ASCII")}') # type: ignore
 
     # TODO: Should we allow (or warn about) key IDs from the unprotected header?
     #       I mean, as long as the actual key it referres to is valid
@@ -1656,9 +1656,9 @@ def verify_ehc(msg: Sign1Message, issued_at: datetime, certs: CertList, print_ex
     else:
         revoked = False
 
-    msg.key = cert_to_cose_key(cert)
+    msg.key = cert_to_cose_key(cert) # type: ignore
 
-    valid = msg.verify_signature()
+    valid = msg.verify_signature() # type: ignore
     usage = get_key_usage(cert)
 
     ehc_payload = cbor2.loads(msg.payload)
