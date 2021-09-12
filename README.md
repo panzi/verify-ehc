@@ -3,35 +3,10 @@ Verify EHC
 
 A simple Python script to decode and verify an European Health Certificate QR-code.
 
-Note that the expiration date read from the EHC doesn't seem to be the proper
-expiration date of tests or vaccinations as defined by EU or local law. In all
-examples I saw it is much longer. Therefore you need to implement your own logic
-with the rules defined by your government to get proper expirations dates.
-
-Here in Austria the rules as of writing (2021-06-26) are as follows (Source:
-[gesundheit.gv.at](https://www.gesundheit.gv.at/service/gruener-pass/inhalt#heading_Was_bekomme_ich_ein_Impfzertifikat_und_wie_lange_gilt_es_)):
-
-For tests:
-
-* Self-Test: 24 hours (though as far as I know self-tests don't get an EHC)
-* Antigen-Tests: 48 hours
-* PCR-Tests: 72 hours
-
-For vaccinations:
-
-* For vaccines with 2 vacciantions:
-  - 1st vaccination is valid starting from 22 days and ending at 90 days after
-    the vaccination
-  - 2nd vaccination adds 180 days to that (i.e. it's valid for 270 days from
-    the 1st vaccination, though the date of the 1st vaccination is not included
-    in the EHC of the 2nd vaccination!)
-* For vaccines with only 1 vaccination (e.g. Johnson & Johnson):
-  - valid starting from 22 days and ending at 270 days after the vaccination
-* For people recovered from COVID-19 that only need 1 vaccination:
-  - valid starting from the day of vaccination and ending at 270 days after
-
-**NOTE:** These rules might be different in different countries and are subject
-to change. This information is supplied without liability.
+Note that the expiration date read from the EHC isn't expiration date of tests or
+vaccinations as defined by EU or local law. In all examples I saw it is much longer.
+Therefore you need to implement your own logic with the rules defined by your
+government to get proper expirations dates.
 
 Norwegian COVID-19 Certificate
 ------------------------------
