@@ -1927,6 +1927,21 @@ def save_certs(certs: CertList, certs_path: str, allow_public_key_only: bool = F
                     })
         with open(certs_path, 'wb') as fp:
             cbor2.dump({'c': cert_list}, fp)
+
+    elif lower_ext == '.pem':
+        with open(certs_path, 'wb') as fp:
+            for cert in certs.values():
+                cert_data = cert.public_bytes(Encoding.PEM)
+                fp.write(cert_data)
+
+    elif lower_ext == '.der' or lower_ext == '.crt':
+        if len(certs) != 1:
+            raise ValueError(f'Can only store exactly one certificate to a {ext} file')
+        cert = next(iter(certs.values()))
+        with open(certs_path, 'wb') as fp:
+            cert_data = cert.public_bytes(Encoding.DER)
+            fp.write(cert_data)
+
     else:
         raise ValueError(f'Unsupported certificates file extension: {ext!r}')
 
