@@ -424,6 +424,36 @@ def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
 
     return certs
 
+def load_ehc_certs_pem(pem_data: bytes, source: str) -> CertList:
+    certs: CertList = {}
+    index = 0
+    while index < len(pem_data):
+        while index < len(pem_data) and chr(pem_data[index]).isspace():
+            index += 1
+
+        if index >= len(pem_data):
+            break
+
+        if not pem_data.startswith(b'-----BEGIN CERTIFICATE-----', index):
+            raise ValueError(f'decoding {source}: illegal file format')
+
+        end_index = pem_data.find(b'-----END CERTIFICATE-----', index)
+        if end_index < 0:
+            raise ValueError(f'decoding {source}: illegal file format')
+        end_index += len(b'-----END CERTIFICATE-----')
+        cert = load_pem_x509_certificate(pem_data[index:end_index])
+        index = end_index
+
+        fingerprint = cert.fingerprint(hashes.SHA256())
+        key_id = fingerprint[0:8]
+
+        if key_id in certs:
+            print_warn(f'doubled key ID in {source} trust list, only using last: {format_key_id(key_id)}')
+
+        certs[key_id] = cert
+
+    return certs
+
 def make_json_relative_distinguished_name(name: Name) -> Dict[str, str]:
     return {_NAMEOID_TO_NAME.get(attr.oid, attr.oid.dotted_string): attr.value
             for attr in reversed(list(name))}
@@ -2275,10 +2305,22 @@ def main() -> None:
     certs: Optional[CertList] = None
     if not args.no_verify or args.save_certs or args.list_certs:
         if args.certs_file:
-            if args.certs_file.lower().endswith('.json'):
+            lower_certs_file = args.certs_file.lower()
+            if lower_certs_file.endswith('.json'):
                 with open(args.certs_file, 'rb') as fp:
                     certs_data = fp.read()
                 certs = load_hack_certs_json(certs_data, args.certs_file)
+            elif lower_certs_file.endswith('.pem'):
+                with open(args.certs_file, 'rb') as fp:
+                    certs_data = fp.read()
+                certs = load_ehc_certs_pem(certs_data, args.certs_file)
+            elif lower_certs_file.endswith('.der') or lower_certs_file.endswith('.crt'):
+                with open(args.certs_file, 'rb') as fp:
+                    certs_data = fp.read()
+                cert = load_der_x509_certificate(certs_data)
+                fingerprint = cert.fingerprint(hashes.SHA256())
+                key_id = fingerprint[0:8]
+                certs = {key_id: cert}
             else:
                 certs = load_ehc_certs(args.certs_file)
         else:
