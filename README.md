@@ -165,6 +165,44 @@ CBOR file these public keys are skipped and an error message is printed for
 each. You can use them when saving the trust list to JSON, though, because that
 itself doesn't contain a full x509 certificate.
 
+### Trust List Verification
+
+Some countries sign their trust-list using a root certificate. If that is
+supported by a given trust-list this script will verify the signature when
+downloading it. The root certificates don't need to be updated that often, so
+you might want to download and "pin" them (use the downloaded root certificate).
+
+Example:
+
+```bash
+./verify_ehc.py --download-root-cert AT@saved_at_root_cert.pem
+export AT_ROOT_CERT=saved_at_root_cert.pem
+./verify_ehc.py --certs-from AT --save-certs trust_list.cbor
+```
+
+You can use OpenSSL to check when the root certificate is due to renewal:
+
+```bash
+$ openssl x509 -text -in saved_at_root_cert.pem
+...
+        Validity
+            Not Before: Jun  2 13:46:21 2021 GMT
+            Not After : Jul  2 13:46:21 2022 GMT
+...
+```
+
+Note that some countries don't provide actual root certificates, but only public
+keys. These can be used to check the signature of a trust-list just as well, but
+plain public keys don't include validity date ranges. I.e. I don't know when
+to refresh those.
+
+Every country has their own trust-list format and way of signature verification.
+Since this script saves trust-lists in a common format (and can merge several
+trust lists into one) no matter the source there is no trust-list signature that
+can be checked once loaded via `--certs-file`. Meaning the trust-list signature
+check is only performed (and the root certificates are only used) when downloading
+a trust-list via `--certs-from`.
+
 MIT License
 -----------
 

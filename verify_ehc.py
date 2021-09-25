@@ -8,7 +8,6 @@ import zlib
 import re
 import os
 import argparse
-import codecs
 import hashlib
 import enum
 import shutil
@@ -42,10 +41,10 @@ from cose.messages import CoseMessage, Sign1Message # type: ignore
 from cose.algorithms import Ps256, Es256
 
 from cryptography import x509
-from cryptography.x509 import load_der_x509_certificate, load_pem_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, RelativeDistinguishedName, NameAttribute, Version, Extensions, Extension
+from cryptography.x509 import load_der_x509_certificate, load_pem_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, NameAttribute, Version, Extensions, Extension
 from cryptography.x509.extensions import ExtensionNotFound, ExtendedKeyUsage
 from cryptography.x509.name import _NAMEOID_TO_NAME
-from cryptography.x509.oid import NameOID, ObjectIdentifier, ExtensionOID
+from cryptography.x509.oid import NameOID, ObjectIdentifier, ExtensionOID # type: ignore
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key, load_der_public_key
@@ -2175,26 +2174,26 @@ def main() -> None:
                     # TODO: Write proper help text once this information becomes available.
                     #(
                     #    'AT_TOKEN',
-                    #    "Downloading the Austrian (AT) trust list needs the nevironment variable AT_TOKEN set to "
+                    #    "Downloading the Austrian (AT) trust list requires the environment variable AT_TOKEN set to "
                     #    "a token that you will be able to get from somewhere. Still waiting on the government to "
-                    #    "pulicise anything about that.\n"
-                    #    "<insert description and link here>"
+                    #    "pulicise anything about that. "
+                    #    "See also: https://github.com/Federal-Ministry-of-Health-AT/green-pass-overview"
                     #),
                     (
                         'CH_TOKEN',
-                        "Downloading the Swiss (CH) trust list and root certificate needs the environment variable "
+                        "Downloading the Swiss (CH) trust list and root certificate requires the environment variable "
                         "CH_TOKEN set to a bearer token that can be found in the BIT's Android CovidCertificate app "
                         "APK. See also: https://github.com/cn-uofbasel/ch-dcc-keys"
                     ),
                     (
                         'FR_TOKEN',
-                        "Downloading the French (FR) trust list needs the environment variable FR_TOKEN set to a bearer "
+                        "Downloading the French (FR) trust list requires the environment variable FR_TOKEN set to a bearer "
                         "token that can be found in the TousAntiCovid Verif app. "
                         "See also token_lite: https://gitlab.inria.fr/tousanticovid-verif/tousanticovid-verif-ios/-/blob/master/Anticovid%20Verify/resources/prod/prod.plist"
                     ),
                     (
                         'NO_TOKEN',
-                        "Downloading the Norwegian (NO) trust list needs the environment variable NO_TOKEN set to an "
+                        "Downloading the Norwegian (NO) trust list requires the environment variable NO_TOKEN set to an "
                         "AuthorizationHeader string that can be found in the Kontroll av koronasertifikat app APK. "
                         "See also: https://harrisonsand.com/posts/covid-certificates/"
                     ),
