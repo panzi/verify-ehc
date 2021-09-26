@@ -9,7 +9,7 @@ Therefore you need to implement your own logic with the rules defined by your
 government to get proper expirations dates.
 
 **NOTE:** If you ask me how to commit document forgery I'll forward your message to
-the police. (Gladly it isn't possible to forge European Health Certificates because
+the police. (Luckily it isn't possible to forge European Health Certificates because
 it uses state of the art cryptography.)
 
 Norwegian COVID-19 Certificate
