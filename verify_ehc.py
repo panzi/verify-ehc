@@ -265,8 +265,8 @@ USER_AGENT = 'Mozilla/5.0 (Windows) Firefox/90.0'
 # See also this thread:
 # https://github.com/eu-digital-green-certificates/dgc-participating-countries/issues/10
 
-DEFAULT_NOT_VALID_BEFORE = datetime(1970, 1, 1, tzinfo=timezone.utc)
-DEFAULT_NOT_VALID_AFTER  = datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc)
+DEFAULT_NOT_VALID_BEFORE = datetime(1970, 1, 1)
+DEFAULT_NOT_VALID_AFTER  = datetime(9999, 12, 31, 23, 59, 59, 999999)
 
 class HackCertificate(x509.Certificate):
     _public_key: Union[EllipticCurvePublicKey, RSAPublicKey]
