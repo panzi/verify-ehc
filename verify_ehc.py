@@ -42,7 +42,7 @@ from cose.algorithms import Ps256, Es256
 
 from cryptography import x509
 from cryptography.x509 import load_der_x509_certificate, load_pem_x509_certificate, load_der_x509_crl, load_pem_x509_crl, Name, NameAttribute, Version, Extensions, Extension
-from cryptography.x509.extensions import ExtensionNotFound, ExtendedKeyUsage
+from cryptography.x509.extensions import AuthorityKeyIdentifier, CRLDistributionPoints, ExtensionNotFound, ExtendedKeyUsage, SubjectKeyIdentifier
 from cryptography.x509.name import _NAMEOID_TO_NAME
 from cryptography.x509.oid import NameOID, ObjectIdentifier, ExtensionOID # type: ignore
 from cryptography.exceptions import InvalidSignature
@@ -925,19 +925,24 @@ def build_trust_chain(certs: List[x509.Certificate]) -> Dict[bytes, x509.Certifi
     trustchain: Dict[bytes, x509.Certificate] = {}
 
     for cert in certs:
-        subject_key_id = cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
-        trustchain[subject_key_id] = cert
+        subject_key_id: Extension[SubjectKeyIdentifier] = cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER) # type: ignore
+        trustchain[subject_key_id.value.digest] = cert
 
     return trustchain
 
 def verify_trust_chain(cert: x509.Certificate, trustchain: Dict[bytes, x509.Certificate], root_cert: x509.Certificate) -> bool:
     signed_cert = cert
     rsa_padding = PKCS1v15()
-    root_subject_key_id = root_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
+    root_subject_key_id_ext: Extension[SubjectKeyIdentifier] = root_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER) # type: ignore
+    root_subject_key_id = root_subject_key_id_ext.value.digest
     visited: Set[bytes] = set()
 
     while signed_cert is not root_cert:
-        auth_key_id = signed_cert.extensions.get_extension_for_oid(ExtensionOID.AUTHORITY_KEY_IDENTIFIER).value.key_identifier
+        auth_key_id_ext: Extension[AuthorityKeyIdentifier] = signed_cert.extensions.get_extension_for_oid(ExtensionOID.AUTHORITY_KEY_IDENTIFIER) # type: ignore
+        auth_key_id = auth_key_id_ext.value.key_identifier
+
+        if auth_key_id is None:
+            raise ValueError(f'a certificate in the trust chain misses an authority key identifier')
 
         if auth_key_id in visited:
             raise ValueError('loop in trust chain detected')
@@ -975,7 +980,7 @@ def verify_trust_chain(cert: x509.Certificate, trustchain: Dict[bytes, x509.Cert
                 pubkey.verify(
                     signed_cert.signature,
                     signed_cert.tbs_certificate_bytes,
-                    ECDSA(signed_cert.signature_hash_algorithm),
+                    ECDSA(signed_cert.signature_hash_algorithm), # type: ignore
                 )
             else:
                 pubkey_type = type(pubkey)
@@ -983,8 +988,12 @@ def verify_trust_chain(cert: x509.Certificate, trustchain: Dict[bytes, x509.Cert
 
         except InvalidSignature:
             try:
-                subject_key_id = signed_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER).value.digest
+                subject_key_id_ext: Extension[SubjectKeyIdentifier] = signed_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER) # type: ignore
+                subject_key_id = subject_key_id_ext.value.digest
             except ExtensionNotFound:
+                subject_key_id_str = 'N/A'
+            except ValueError as error:
+                print_err(f'Parsing extended key usage: {error}')
                 subject_key_id_str = 'N/A'
             else:
                 subject_key_id_str = ':'.join('%02X' % x for x in subject_key_id)
@@ -1568,7 +1577,7 @@ def load_jwt(token: bytes, root_cert: x509.Certificate, options: Optional[Dict[s
             pubkey.verify(
                 signed_cert.signature,
                 signed_cert.tbs_certificate_bytes,
-                ECDSA(signed_cert.signature_hash_algorithm),
+                ECDSA(signed_cert.signature_hash_algorithm), # type: ignore
             )
         else:
             pubkey_type = type(pubkey)
@@ -1789,9 +1798,11 @@ def get_cached_crl(uri: str) -> x509.CertificateRevocationList:
 
 def get_revoked_cert(cert: x509.Certificate) -> Optional[x509.RevokedCertificate]:
     try:
-        crl_points_ext = cert.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS)
+        crl_points_ext: Extension[CRLDistributionPoints] = cert.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS) # type: ignore
     except ExtensionNotFound:
         pass
+    except ValueError as error:
+        print_err(f'Parsing CRL distribution points: {error}')
     else:
         crl_points = crl_points_ext.value
         for crl_point in crl_points:
@@ -2019,9 +2030,11 @@ def print_table(header: List[str], align: List[Align], body: List[List[str]]) ->
 def get_key_usage(cert: x509.Certificate) -> Set[str]:
     usage: Set[str] = set()
     try:
-        ext_key_usage = cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE)
+        ext_key_usage: Extension[ExtendedKeyUsage] = cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE) # type: ignore
     except ExtensionNotFound:
         pass
+    except ValueError as error:
+        print_err(f'Parsing extended key usage: {error}')
     else:
         for oid in ext_key_usage.value:
             usage_name = EXT_KEY_USAGE_NAMES.get(oid)
@@ -2047,11 +2060,19 @@ def print_cert(key_id: bytes, cert: x509.Certificate, print_exts: bool = False, 
         cert.not_valid_after.isoformat()  if cert.not_valid_after  is not None else 'N/A')
     print(f'{indent}Version         :', cert.version.name)
 
+    try:
+        exts = cert.extensions
+    except ValueError as error:
+        print_err(f'Parsing extensions: {error}')
+        exts = Extensions([])
+
     usage: Set[str] = set()
     try:
-        ext_key_usage = cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE)
+        ext_key_usage: Extension[ExtendedKeyUsage] = exts.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE) # type: ignore
     except ExtensionNotFound:
         pass
+    except ValueError as error:
+        print_err(f'Parsing extended key usage: {error}')
     else:
         for oid in ext_key_usage.value:
             usage_name = EXT_KEY_USAGE_NAMES.get(oid)
@@ -2080,9 +2101,9 @@ def print_cert(key_id: bytes, cert: x509.Certificate, print_exts: bool = False, 
         if revoked_cert:
             print(f'{indent}Revoked At      :', revoked_cert.revocation_date.isoformat())
 
-    if print_exts and cert.extensions:
+    if print_exts and exts:
         print(f'{indent}Extensions      :')
-        for ext in cert.extensions:
+        for ext in exts:
             print(f'{indent}- oid={ext.oid.dotted_string}, name={ext.oid._name}, value={ext.value}')
 
 def main() -> None:
