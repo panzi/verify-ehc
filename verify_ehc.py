@@ -779,7 +779,7 @@ def download_se_certs() -> CertList:
                         print_warn(f'doubled key ID in SE trust list, only using last: {format_key_id(key_id)}')
 
                 except Exception as error:
-                    print_err(f'decoding SE trust list entry {key_id.hex()} / {b64encode(key_id).decode("ASCII")}: {error}')
+                    print_err(f'decoding SE trust list entry {format_key_id(key_id)}: {error}')
                 else:
                     certs[key_id] = cert
 
@@ -1361,9 +1361,23 @@ def download_it_certs() -> CertList:
         if response.status_code == 204:
             break
         response.raise_for_status()
-        key_id = response.headers['x-kid']
-        cert = response.content
-        certs[b64decode(key_id)] = x509.load_der_x509_certificate(b64decode(cert))
+
+        try:
+            key_id = b64decode(response.headers['x-kid'])
+            cert = load_der_x509_certificate(b64decode(response.content))
+
+            fingerprint = cert.fingerprint(hashes.SHA256())
+            if key_id != fingerprint[0:8]:
+                raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+
+            if key_id in certs:
+                print_warn(f'doubled key ID in IT trust list, only using last: {format_key_id(key_id)}')
+
+        except Exception as error:
+            print_err(f'decoding IT trust list entry {format_key_id(key_id)}: {error}')
+        else:
+            certs[key_id] = cert
+
         resume_token = response.headers.get('x-resume-token')
         if not resume_token:
             break
