@@ -27,8 +27,8 @@ Usage
 ```plain
 usage: verify_ehc.py [--help]
                      [--certs-file FILE | --certs-from LIST | --certs-table LIST]
-                     [--no-verify] [--list-certs] [--print-exts]
-                     [--strip-revoked] [--save-certs FILE]
+                     [--no-verify] [--no-key-id-check] [--list-certs]
+                     [--print-exts] [--strip-revoked] [--save-certs FILE]
                      [--download-root-cert SOURCE[@FILENAME]]
                      [--download-all-root-certs] [--allow-public-key-only]
                      [--envfile FILE] [--fail-on-error] [--warning-as-error]
@@ -61,6 +61,11 @@ optional arguments:
                         means the certificate/public key is in the trust list,
                         but no country attribute is known for it.
   --no-verify           Skip certificate verification.
+  --no-key-id-check     Disable check of key IDs.
+                        Key IDs are suppost to be the first 8 bytes of the
+                        SHA512 hash of the certificate, but some certificates
+                        of non-EU countries don't adhere to that and give out
+                        different key IDs.
   --list-certs          List certificates from trust list.
   --print-exts          Also print certificate extensions.
   --strip-revoked       Strip revoked certificates. (Downloads certificate
@@ -112,18 +117,18 @@ environment variables:
                         AT, CH, DE, NL, SE
 
   CH_TOKEN            Downloading the Swiss (CH) trust list and root certificate
-                      needs the environment variable CH_TOKEN set to a bearer
+                      requires the environment variable CH_TOKEN set to a bearer
                       token that can be found in the BIT's Android
                       CovidCertificate app APK. See also:
                       https://github.com/cn-uofbasel/ch-dcc-keys
 
-  FR_TOKEN            Downloading the French (FR) trust list needs the
+  FR_TOKEN            Downloading the French (FR) trust list requires the
                       environment variable FR_TOKEN set to a bearer token that
                       can be found in the TousAntiCovid Verif app. See also
                       token_lite:
                       https://gitlab.inria.fr/tousanticovid-verif/tousanticovid-verif-ios/-/blob/master/Anticovid%20Verify/resources/prod/prod.plist
 
-  NO_TOKEN            Downloading the Norwegian (NO) trust list needs the
+  NO_TOKEN            Downloading the Norwegian (NO) trust list requires the
                       environment variable NO_TOKEN set to an AuthorizationHeader
                       string that can be found in the Kontroll av
                       koronasertifikat app APK. See also:
