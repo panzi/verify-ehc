@@ -47,7 +47,7 @@ optional arguments:
                         country overwrites earlier.
                         See also environment variables.
                         
-                        Supported countries: AT, CH, DE, FR, GB, NL, NO, SE
+                        Supported countries: AT, CH, DE, FR, GB, IT, NL, NO, SE
                         
                         Note that the GB trust list only contains GB public
                         keys, so you might want to combine it with another.

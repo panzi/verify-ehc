@@ -247,6 +247,10 @@ ROOT_CERT_URL_SE = 'https://dgcg.covidbevis.se/tp/cert'
 # United Kingdom trust list:
 CERTS_URL_GB = 'https://covid-status.service.nhsx.nhs.uk/pubkeys/keys.json'
 
+# Italian trust list:
+CERTS_URL_IT = 'https://get.dgc.gov.it/v1/dgc/signercertificate/update'
+# Source: https://github.com/ministero-salute/dcc-utils/blob/master/examples/fetch_certificates.js
+
 CERTS_URL_COVID_PASS_VERIFIER = 'https://covid-pass-verifier.com/assets/certificates.json'
 
 # Norwegian trust list:
@@ -1346,6 +1350,25 @@ def download_gb_certs() -> CertList:
 
     return certs
 
+def download_it_certs() -> CertList:
+    certs: CertList = {}
+    resume_token = None
+    while True:
+        headers: Dict[str, str] = {'User-Agent': USER_AGENT}
+        if resume_token:
+            headers['X-RESUME-TOKEN'] = resume_token
+        response = requests.get(CERTS_URL_IT, headers=headers)
+        if response.status_code == 204:
+            break
+        response.raise_for_status()
+        key_id = response.headers['x-kid']
+        cert = response.content
+        certs[b64decode(key_id)] = x509.load_der_x509_certificate(b64decode(cert))
+        resume_token = response.headers.get('x-resume-token')
+        if not resume_token:
+            break
+    return certs
+
 DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'AT-GREENCHECK':   download_at_greencheck_certs,
     'AT':              download_at_certs,
@@ -1354,6 +1377,7 @@ DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'DE': download_de_certs,
     'FR': download_fr_certs,
     'GB': download_gb_certs,
+    'IT': download_it_certs,
     'NL': download_nl_certs,
     'NO': download_no_certs,
     'SE': download_se_certs,
@@ -2121,7 +2145,7 @@ def main() -> None:
         "Download trust list from given country's trust list service. Comma separated list, entries from later country overwrites earlier.\n"
         "See also environment variables.\n"
         "\n"
-        "Supported countries: AT, CH, DE, FR, GB, NL, NO, SE\n"
+        "Supported countries: AT, CH, DE, FR, GB, IT, NL, NO, SE\n"
         "\n"
         "Note that the GB trust list only contains GB public keys, so you might want to combine it with another.\n"
         "\n"
