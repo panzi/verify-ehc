@@ -372,12 +372,12 @@ def json_serial(obj: Any) -> str:
         return obj.isoformat()
     raise TypeError(f"Type {type(obj)} not serializable")
 
-def load_ehc_certs(filename: str) -> CertList:
+def load_ehc_certs(filename: str, check_kid: bool) -> CertList:
     with open(filename, 'rb') as stream:
         certs_cbor = stream.read()
-    return load_ehc_certs_cbor(certs_cbor, filename)
+    return load_ehc_certs_cbor(certs_cbor, filename, check_kid)
 
-def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
+def load_ehc_certs_cbor(cbor_data: bytes, source: str, check_kid: bool) -> CertList:
     certs_data = cbor2.loads(cbor_data)
     certs: CertList = {}
     for item in certs_data['c']:
@@ -387,9 +387,10 @@ def load_ehc_certs_cbor(cbor_data: bytes, source: str) -> CertList:
 
             if cert_data:
                 cert = load_der_x509_certificate(cert_data)
-                fingerprint = cert.fingerprint(hashes.SHA256())
-                if key_id != fingerprint[0:8]:
-                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+                if check_kid:
+                    fingerprint = cert.fingerprint(hashes.SHA256())
+                    if key_id != fingerprint[0:8]:
+                        raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
             else:
                 pubkey_data = item['k']
                 pubkey = load_der_public_key(pubkey_data)
@@ -552,7 +553,7 @@ def print_warn(msg: str) -> None:
         sys.stdout.flush()
         print(f'WARNING: {msg}', file=sys.stderr)
 
-def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = None) -> CertList:
+def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = None, check_kid: bool = True) -> CertList:
     certs: CertList = {}
 
     sign_b64, body_json = data.split(b'\n', 1)
@@ -586,9 +587,10 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
                 raw_data = b64decode(cert['rawData'])
 
                 cert = load_der_x509_certificate(raw_data)
-                fingerprint = cert.fingerprint(hashes.SHA256())
-                if key_id != fingerprint[0:8]:
-                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+                if check_kid:
+                    fingerprint = cert.fingerprint(hashes.SHA256())
+                    if key_id != fingerprint[0:8]:
+                        raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
                 if key_id in certs:
                     print_warn(f'doubled key ID in DE trust list, only using last: {format_key_id(key_id)}')
@@ -600,7 +602,7 @@ def load_de_trust_list(data: bytes, pubkey: Optional[EllipticCurvePublicKey] = N
 
     return certs
 
-def download_at_greencheck_certs() -> CertList:
+def download_at_greencheck_certs(check_kid: bool) -> CertList:
     root_certs: Dict[bytes, x509.Certificate]
     cookies: Optional[RequestsCookieJar] = None
 
@@ -662,9 +664,9 @@ def download_at_greencheck_certs() -> CertList:
     else:
         print_err(f'root certificate for AT trust list not found!')
 
-    return load_ehc_certs_cbor(certs_cbor, 'AT')
+    return load_ehc_certs_cbor(certs_cbor, 'AT', check_kid)
 
-def download_at_certs(test: bool = False, token: Optional[str] = None) -> CertList:
+def download_at_certs(check_kid: bool, test: bool = False, token: Optional[str] = None) -> CertList:
     # TODO: update to handle tokens once required
     #if token is None:
     #    token = os.getenv('AT_TOKEN')
@@ -733,9 +735,9 @@ def download_at_certs(test: bool = False, token: Optional[str] = None) -> CertLi
     if now > expires_at:
         raise ValueError(f'AT trust list already expired at {expires_at.isoformat()}')
 
-    return load_ehc_certs_cbor(certs_cbor, 'AT')
+    return load_ehc_certs_cbor(certs_cbor, 'AT', check_kid)
 
-def download_de_certs() -> CertList:
+def download_de_certs(check_kid: bool) -> CertList:
     response = requests.get(CERTS_URL_DE, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
     certs_signed_json = response.content
@@ -746,9 +748,9 @@ def download_de_certs() -> CertList:
     except (BaseHTTPError, ValueError) as error:
         print_err(f'DE trust list error (NOT VALIDATING): {error}')
 
-    return load_de_trust_list(certs_signed_json, pubkey)
+    return load_de_trust_list(certs_signed_json, pubkey, check_kid)
 
-def download_se_certs() -> CertList:
+def download_se_certs(check_kid: bool) -> CertList:
     certs: CertList = {}
     root_cert: Optional[x509.Certificate] = None
 
@@ -771,9 +773,10 @@ def download_se_certs() -> CertList:
             for key_data in entry['x5c']:
                 try:
                     cert = load_der_x509_certificate(b64decode_ignore_padding(key_data))
-                    fingerprint = cert.fingerprint(hashes.SHA256())
-                    if key_id != fingerprint[0:8]:
-                        raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+                    if check_kid:
+                        fingerprint = cert.fingerprint(hashes.SHA256())
+                        if key_id != fingerprint[0:8]:
+                            raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
                     if key_id in certs:
                         print_warn(f'doubled key ID in SE trust list, only using last: {format_key_id(key_id)}')
@@ -785,7 +788,7 @@ def download_se_certs() -> CertList:
 
     return certs
 
-def download_covid_pass_verifier_certs() -> CertList:
+def download_covid_pass_verifier_certs(check_kid: bool) -> CertList:
     certs: CertList = {}
     response = requests.get(CERTS_URL_COVID_PASS_VERIFIER, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
@@ -799,9 +802,10 @@ def download_covid_pass_verifier_certs() -> CertList:
             except Exception as error:
                 print_err(f'decoding covid-pass-verifier.com trust list entry {format_key_id(key_id)}: {error}')
             else:
-                fingerprint = cert.fingerprint(hashes.SHA256())
-                if key_id != fingerprint[0:8]:
-                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+                if check_kid:
+                    fingerprint = cert.fingerprint(hashes.SHA256())
+                    if key_id != fingerprint[0:8]:
+                        raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
                 if key_id in certs:
                     print_warn(f'doubled key ID in covid-pass-verifier.com trust list, only using last: {format_key_id(key_id)}')
@@ -855,7 +859,7 @@ def download_covid_pass_verifier_certs() -> CertList:
                 print_err(f'decoding covid-pass-verifier.com trust list entry {format_key_id(key_id)}: no supported public key data found')
     return certs
 
-def download_fr_certs(token: Optional[str] = None) -> CertList:
+def download_fr_certs(check_kid: bool, token: Optional[str] = None) -> CertList:
     certs: CertList = {}
     if token is None:
         token = os.getenv('FR_TOKEN')
@@ -890,29 +894,9 @@ def download_fr_certs(token: Optional[str] = None) -> CertList:
                     # HackCertificate.fingerprint() is not implemented
 
                 else:
-                    fingerprint = cert.fingerprint(hashes.SHA256())
-                    if key_id != fingerprint[0:8]:
-                        pubkey = cert.public_key()
-                        attrs = cert.subject.get_attributes_for_oid(NameOID.COUNTRY_NAME)
-                        if attrs and all(attr.value == 'UK' for attr in attrs) and isinstance(pubkey, (RSAPublicKey, EllipticCurvePublicKey)):
-                            # replace fake FR trust list certificate by my own fake certificate
-                            # XXX: not eintirely sure if I should do this?
-
-                            issuer  = [attr for attr in cert.issuer  if attr.oid != NameOID.COUNTRY_NAME]
-                            subject = [attr for attr in cert.subject if attr.oid != NameOID.COUNTRY_NAME]
-                            issuer.append( NameAttribute(NameOID.COUNTRY_NAME, 'GB'))
-                            subject.append(NameAttribute(NameOID.COUNTRY_NAME, 'GB'))
-
-                            cert = HackCertificate(
-                                pubkey,
-                                issuer  = Name(issuer),
-                                subject = Name(subject),
-                                not_valid_before = cert.not_valid_before,
-                                not_valid_after  = cert.not_valid_after,
-                            )
-                        else:
-                            #print()
-                            #print_cert(key_id, cert, print_exts=True)
+                    if check_kid:
+                        fingerprint = cert.fingerprint(hashes.SHA256())
+                        if key_id != fingerprint[0:8]:
                             raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
                 if key_id in certs:
@@ -1113,7 +1097,7 @@ def verify_pkcs7_detached_signature(payload: bytes, signature: bytes, root_cert:
 
     return True
 
-def download_nl_certs(token: Optional[str] = None) -> CertList:
+def download_nl_certs(check_kid: bool, token: Optional[str] = None) -> CertList:
     # Fetch the root certificate for the Netherlands; used to secure the
     # trust list. Non fatal error if this fails.
     root_cert: Optional[x509.Certificate] = None
@@ -1186,7 +1170,7 @@ def get_ch_token() -> str:
             "You can get the value of the token from the BIT's Android CovidCertificate app APK.")
     return token
 
-def download_ch_certs(token: Optional[str] = None) -> CertList:
+def download_ch_certs(check_kid: bool, token: Optional[str] = None) -> CertList:
     if token is None:
         token = get_ch_token()
 
@@ -1284,7 +1268,7 @@ def download_ch_certs(token: Optional[str] = None) -> CertList:
 
     return certs
 
-def download_no_certs(token: Optional[str] = None) -> CertList:
+def download_no_certs(check_kid: bool, token: Optional[str] = None) -> CertList:
     NO_USER_AGENT = 'FHICORC/38357 CFNetwork/1240.0.4 Darwin/20.5.0'
 
     if token is None:
@@ -1318,7 +1302,7 @@ def download_no_certs(token: Optional[str] = None) -> CertList:
 
     return certs
 
-def download_gb_certs() -> CertList:
+def download_gb_certs(check_kid: bool) -> CertList:
     response = requests.get(CERTS_URL_GB, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
 
@@ -1350,7 +1334,7 @@ def download_gb_certs() -> CertList:
 
     return certs
 
-def download_it_certs() -> CertList:
+def download_it_certs(check_kid: bool) -> CertList:
     certs: CertList = {}
     resume_token = None
     while True:
@@ -1366,9 +1350,10 @@ def download_it_certs() -> CertList:
             key_id = b64decode(response.headers['x-kid'])
             cert = load_der_x509_certificate(b64decode(response.content))
 
-            fingerprint = cert.fingerprint(hashes.SHA256())
-            if key_id != fingerprint[0:8]:
-                raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
+            if check_kid:
+                fingerprint = cert.fingerprint(hashes.SHA256())
+                if key_id != fingerprint[0:8]:
+                    raise ValueError(f'Key ID missmatch: {key_id.hex()} != {fingerprint[0:8].hex()}')
 
             if key_id in certs:
                 print_warn(f'doubled key ID in IT trust list, only using last: {format_key_id(key_id)}')
@@ -1383,10 +1368,10 @@ def download_it_certs() -> CertList:
             break
     return certs
 
-DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
+DOWNLOADERS: Dict[str, Callable[[bool], CertList]] = {
     'AT-GREENCHECK':   download_at_greencheck_certs,
     'AT':              download_at_certs,
-    'AT-TEST': lambda: download_at_certs(test=True),
+    'AT-TEST': lambda check_kid: download_at_certs(check_kid, test=True),
     'CH': download_ch_certs,
     'DE': download_de_certs,
     'FR': download_fr_certs,
@@ -1399,7 +1384,7 @@ DOWNLOADERS: Dict[str, Callable[[], CertList]] = {
     'COVID-PASS-VERIFIER': download_covid_pass_verifier_certs,
 }
 
-def download_ehc_certs(sources: List[str], certs_table: Dict[str, CertList] = {}) -> CertList:
+def download_ehc_certs(sources: List[str], check_kid: bool, certs_table: Dict[str, CertList] = {}) -> CertList:
     certs: CertList = {}
     get_downloader = DOWNLOADERS.get
 
@@ -1412,7 +1397,7 @@ def download_ehc_certs(sources: List[str], certs_table: Dict[str, CertList] = {}
             if downloader is None:
                 raise ValueError(f'Unknown trust list source: {source}')
 
-            certs.update(downloader())
+            certs.update(downloader(check_kid))
 
     return certs
 
@@ -2171,6 +2156,9 @@ def main() -> None:
         '"X" means the certificate/public key is in the trust list, but no country attribute is known for it.')
 
     ap.add_argument('--no-verify', action='store_true', default=False, help='Skip certificate verification.')
+    ap.add_argument('--no-key-id-check', action='store_false', default=True, dest='check_kid', help=
+        "Disable check of key IDs.\n"
+        "Key IDs are suppost to be the first 8 bytes of the SHA512 hash of the certificate, but some certificates of non-EU countries don't adhere to that and give out different key IDs.")
 
     ap.add_argument('--list-certs', action='store_true', help='List certificates from trust list.')
     ap.add_argument('--print-exts', action='store_true', help='Also print certificate extensions.')
@@ -2298,6 +2286,8 @@ def main() -> None:
     FAIL_ON_ERROR    = args.fail_on_error
     WARNING_AS_ERROR = args.warning_as_error
 
+    check_kid = args.check_kid
+
     if args.envfile:
         try:
             with open(args.envfile, 'r') as text_stream:
@@ -2347,7 +2337,7 @@ def main() -> None:
             if downloader is None:
                 raise ValueError(f'Unknown trust list source: {source}')
 
-            source_certs = downloader()
+            source_certs = downloader(check_kid)
             certs_table[source] = source_certs
             all_certs.update(source_certs)
 
@@ -2395,9 +2385,9 @@ def main() -> None:
                 key_id = fingerprint[0:8]
                 certs = {key_id: cert}
             else:
-                certs = load_ehc_certs(args.certs_file)
+                certs = load_ehc_certs(args.certs_file, check_kid)
         else:
-            certs = download_ehc_certs(parse_sources(args.certs_from), certs_table)
+            certs = download_ehc_certs(parse_sources(args.certs_from), check_kid, certs_table)
 
         if not certs:
             print_err("empty trust list!")
