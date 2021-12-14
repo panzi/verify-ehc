@@ -1942,10 +1942,14 @@ def save_certs(certs: CertList, certs_path: str, allow_public_key_only: bool = F
 
                 not_valid_before = cert.not_valid_before
                 if not_valid_before is not DEFAULT_NOT_VALID_BEFORE:
+                    if not_valid_before.tzinfo is None:
+                        not_valid_before = not_valid_before.replace(tzinfo=timezone.utc)
                     entry['nb'] = int(not_valid_before.timestamp())
 
                 not_valid_after = cert.not_valid_before
                 if not_valid_after is not DEFAULT_NOT_VALID_AFTER:
+                    if not_valid_after.tzinfo is None:
+                        not_valid_after = not_valid_after.replace(tzinfo=timezone.utc)
                     entry['na'] = int(not_valid_after.timestamp())
 
                 cert_list.append(entry)
