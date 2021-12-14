@@ -1346,6 +1346,7 @@ def download_it_certs(check_kid: bool) -> CertList:
             break
         response.raise_for_status()
 
+        key_id: Optional[bytes] = None
         try:
             key_id = b64decode(response.headers['x-kid'])
             cert = load_der_x509_certificate(b64decode(response.content))
@@ -1359,7 +1360,7 @@ def download_it_certs(check_kid: bool) -> CertList:
                 print_warn(f'doubled key ID in IT trust list, only using last: {format_key_id(key_id)}')
 
         except Exception as error:
-            print_err(f'decoding IT trust list entry {format_key_id(key_id)}: {error}')
+            print_err(f'decoding IT trust list entry {format_key_id(key_id) if key_id is not None else "(invalid or missing x-kid header)"}: {error}')
         else:
             certs[key_id] = cert
 
