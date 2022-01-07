@@ -68,8 +68,18 @@ optional arguments:
                         different key IDs.
   --list-certs          List certificates from trust list.
   --print-exts          Also print certificate extensions.
-  --strip-revoked       Strip revoked certificates. (Downloads certificate
-                        revocation list, if supported by certificate.)
+  --strip-revoked       Strip revoked X509 certificates.
+                        This downloads the revocation list for each certificate
+                        in the trust list(s), if the certificate has an
+                        revocation list attribute. A lot of the certificates
+                        have broken revocation list entries. Meaning for some
+                        the attribute doesn't even parse, for others the given
+                        URI points to a non-existing endpoint, a broken
+                        endpoint, or the data returned from the endpoint is
+                        broken.
+                        Note that this has nothing to do with revocation of
+                        European Health Certificates, it is only about
+                        revocation of trust list entries.
   --save-certs FILE     Store downloaded trust list to FILE. The filetype is
                         derived from the extension, which can be .json or .cbor
   --download-root-cert SOURCE[@FILENAME]

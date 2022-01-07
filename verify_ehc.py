@@ -616,7 +616,7 @@ def download_at_greencheck_certs(check_kid: bool) -> CertList:
         'User-Agent': USER_AGENT,
         'Accept': 'application/json',
         'x-app-type': 'browser',
-        'x-app-version': '1.10',
+        'x-app-version': '1.12',
         'Sec-Fetch-Dest': 'empty',
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin',
@@ -1711,7 +1711,7 @@ def verify_ehc(msg: CoseMessage, issued_at: datetime, certs: CertList, print_ext
         cert_expired = True
 
     print(f'  Cert Expired    : {cert_expired}')
-    revoked_cert = get_revoked_cert(cert)
+    revoked_cert = get_revoked_cert(key_id, cert)
     if revoked_cert:
         print(f'Cert Revoked At: {revoked_cert.revocation_date.isoformat()}')
         revoked = True
@@ -1820,13 +1820,13 @@ def get_cached_crl(uri: str) -> x509.CertificateRevocationList:
     crls[uri] = crl
     return crl
 
-def get_revoked_cert(cert: x509.Certificate) -> Optional[x509.RevokedCertificate]:
+def get_revoked_cert(key_id: bytes, cert: x509.Certificate) -> Optional[x509.RevokedCertificate]:
     try:
         crl_points_ext: Extension[CRLDistributionPoints] = cert.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS) # type: ignore
     except ExtensionNotFound:
         pass
     except ValueError as error:
-        print_err(f'Parsing CRL distribution points: {error}')
+        print_err(f'parsing CRL distribution points of key {format_key_id(key_id)}: {error}')
     else:
         crl_points = crl_points_ext.value
         for crl_point in crl_points:
@@ -1838,7 +1838,7 @@ def get_revoked_cert(cert: x509.Certificate) -> Optional[x509.RevokedCertificate
                         try:
                             crl = get_cached_crl(uri.value)
                         except Exception as error:
-                            print_err(f'loading revokation list {uri.value} {error}')
+                            print_err(f'loading revokation list of key {format_key_id(key_id)}: {uri.value} {error}')
                         else:
                             return crl.get_revoked_certificate_by_serial_number(cert.serial_number)
     return None
@@ -2169,7 +2169,11 @@ def main() -> None:
     ap.add_argument('--print-exts', action='store_true', help='Also print certificate extensions.')
 
     ap.add_argument('--strip-revoked', action='store_true', help=
-        'Strip revoked certificates. (Downloads certificate revocation list, if supported by certificate.)')
+        'Strip revoked X509 certificates.\n'
+        'This downloads the revocation list for each certificate in the trust list(s), if the certificate has an revocation list attribute. '
+        "A lot of the certificates have broken revocation list entries. Meaning for some the attribute doesn't even parse, for others the "
+        'given URI points to a non-existing endpoint, a broken endpoint, or the data returned from the endpoint is broken.\n'
+        'Note that this has nothing to do with revocation of European Health Certificates, it is only about revocation of trust list entries.')
 
     ap.add_argument('--save-certs', metavar='FILE', action='append', help=
         'Store downloaded trust list to FILE. The filetype is derived from the extension, which can be .json or .cbor')
@@ -2405,10 +2409,9 @@ def main() -> None:
 
             if args.strip_revoked:
                 for key_id, cert in items:
-                    revoked_cert = get_revoked_cert(cert)
+                    revoked_cert = get_revoked_cert(key_id, cert)
                     if revoked_cert:
                         revoked_certs[key_id] = revoked_cert
-                        revoked = True
 
             if args.list_certs:
                 revoked_certs_for_print: Optional[Dict[bytes, x509.RevokedCertificate]] = revoked_certs if args.strip_revoked else None
