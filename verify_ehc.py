@@ -264,7 +264,7 @@ ROOT_CERT_URL_CH = 'https://www.bit.admin.ch/dam/bit/en/dokumente/pki/scanning_c
 CERTS_URL_CH     = 'https://www.cc.bit.admin.ch/trust/v1/keys/list'
 UPDATE_URL_CH    = 'https://www.cc.bit.admin.ch/trust/v1/keys/updates?certFormat=ANDROID'
 
-USER_AGENT = 'Mozilla/5.0 (Windows) Firefox/90.0'
+USER_AGENT = os.getenv('USER_AGENT') or 'Mozilla/5.0 (Windows) Firefox/90.0'
 
 # See also this thread:
 # https://github.com/eu-digital-green-certificates/dgc-participating-countries/issues/10
@@ -758,7 +758,6 @@ def download_se_certs(check_kid: bool) -> CertList:
         root_cert = get_root_cert('SE')
     except (BaseHTTPError, ValueError) as error:
         print_err(f'SE trust list error (NOT VALIDATING): {error}')
-
     response = requests.get(CERTS_URL_SE, headers={'User-Agent': USER_AGENT})
     response.raise_for_status()
 
