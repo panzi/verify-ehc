@@ -254,7 +254,7 @@ CERTS_URL_IT = 'https://get.dgc.gov.it/v1/dgc/signercertificate/update'
 CERTS_URL_COVID_PASS_VERIFIER = 'https://covid-pass-verifier.com/assets/certificates.json'
 
 # Norwegian trust list:
-CERTS_URL_NO = 'https://koronakontroll.nhn.no/v2/publickey'
+CERTS_URL_NO = 'https://koronakontroll.nhn.no/v3/publickey'
 # Norwegian COVID-19 certificates seem to be based on the European Health Certificate but just with an 'NO1:' prefix.
 # https://harrisonsand.com/posts/covid-certificates/
 
