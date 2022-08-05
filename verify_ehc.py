@@ -26,7 +26,8 @@ import asn1crypto.cms # type: ignore
 
 from lxml.html import fromstring as parse_html # type: ignore
 from dateutil.parser import isoparse as parse_datetime
-from jose import jwt, jws, jwk # type: ignore
+from jose import jwt, jws, jwk
+from jose.backends.base import Key as JWKKey
 from base45 import b45decode # type: ignore
 from requests.exceptions import BaseHTTPError # type: ignore
 from requests.cookies import RequestsCookieJar # type: ignore
@@ -917,7 +918,7 @@ def build_trust_chain(certs: List[x509.Certificate]) -> Dict[bytes, x509.Certifi
     return trustchain
 
 def verify_trust_chain(cert: x509.Certificate, trustchain: Dict[bytes, x509.Certificate], root_cert: x509.Certificate) -> bool:
-    signed_cert = cert
+    signed_cert: x509.Certificate = cert
     rsa_padding = PKCS1v15()
     root_subject_key_id_ext: Extension[SubjectKeyIdentifier] = root_cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_KEY_IDENTIFIER) # type: ignore
     root_subject_key_id = root_subject_key_id_ext.value.digest
@@ -1578,7 +1579,7 @@ def save_cert(cert: x509.Certificate, filename: str) -> None:
         fp.write(data)
 
 def load_jwt(token: bytes, root_cert: x509.Certificate, options: Optional[Dict[str, bool]] = None) -> Dict[str, Any]:
-    header = jws.get_unverified_header(token)
+    header = jws.get_unverified_header(token) # type: ignore
     trustchain = [x509.load_der_x509_certificate(b64decode(cert_b64)) for cert_b64 in header['x5c']]
     trustchain.append(root_cert)
 
@@ -1589,24 +1590,26 @@ def load_jwt(token: bytes, root_cert: x509.Certificate, options: Optional[Dict[s
 
         pubkey = issuer_cert.public_key()
         if isinstance(pubkey, RSAPublicKey):
+            assert signed_cert.signature_hash_algorithm is not None
             pubkey.verify(
                 signed_cert.signature,
                 signed_cert.tbs_certificate_bytes,
                 rsa_padding,
-                signed_cert.signature_hash_algorithm # type: ignore
+                signed_cert.signature_hash_algorithm
             )
         elif isinstance(pubkey, EllipticCurvePublicKey):
+            assert signed_cert.signature_hash_algorithm is not None
             pubkey.verify(
                 signed_cert.signature,
                 signed_cert.tbs_certificate_bytes,
-                ECDSA(signed_cert.signature_hash_algorithm), # type: ignore
+                ECDSA(signed_cert.signature_hash_algorithm)
             )
         else:
             pubkey_type = type(pubkey)
             raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
     pubkey = trustchain[0].public_key()
-    sigkey: jwk.Key
+    sigkey: JWKKey
     if isinstance(pubkey, RSAPublicKey):
         rsa_pn = pubkey.public_numbers()
         e = rsa_pn.e.to_bytes((rsa_pn.e.bit_length() + 7) // 8, byteorder='big')
@@ -1633,7 +1636,7 @@ def load_jwt(token: bytes, root_cert: x509.Certificate, options: Optional[Dict[s
         pubkey_type = type(pubkey)
         raise NotImplementedError(f'Unsupported public key type: {pubkey_type.__module__}.{pubkey_type.__name__}')
 
-    return jwt.decode(token, key=sigkey, options=options) # type: ignore
+    return jwt.decode(token, key=sigkey, options=options)
 
 def load_hack_certificate_from_der_public_key(data: bytes,
     issuer:  Optional[Name] = None,
