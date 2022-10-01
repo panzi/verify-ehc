@@ -142,6 +142,7 @@ NAME_OIDS_COVID_PASS_VERIFIER = dict(
 )
 NAME_OIDS_COVID_PASS_VERIFIER.update(NAME_OIDS)
 
+name = curve = None
 for name in dir(cose.keys.curves):
     if not name.startswith('_'):
         curve = getattr(cose.keys.curves, name)
