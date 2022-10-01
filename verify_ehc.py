@@ -310,6 +310,10 @@ class HackCertificate(x509.Certificate):
     def tbs_certificate_bytes(self) -> bytes:
         return b''
 
+    @property
+    def tbs_precertificate_bytes(self) -> bytes:
+        return b''
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, HackCertificate):
             return False
